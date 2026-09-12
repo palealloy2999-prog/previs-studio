@@ -42,3 +42,17 @@ test('reorders objects inside a Scene folder', async ({ page }) => {
   const saved = await saveScene(page);
   expect(saved.groups[0].objectIds).toEqual(['character-b', 'character-a']);
 });
+
+test('keeps the timeline ruler fixed while tracks scroll vertically', async ({ page }) => {
+  await page.goto('/');
+  const addBox = page.locator('.asset-grid').getByRole('button', { name: 'Box', exact: true });
+  for (let index = 0; index < 10; index++) await addBox.click();
+  const body = page.locator('.timeline-body'), ruler = page.locator('.ruler'), header = page.locator('.track-label-top'), playheadMarker = page.locator('.playhead > span');
+  const rulerTop = (await ruler.boundingBox())!.y, headerTop = (await header.boundingBox())!.y, playheadTop = (await playheadMarker.boundingBox())!.y;
+  expect(Number(await page.locator('.playhead').evaluate(element => getComputedStyle(element).zIndex))).toBeGreaterThan(Number(await ruler.evaluate(element => getComputedStyle(element).zIndex)));
+  await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(async () => (await body.evaluate(element => element.scrollTop))).toBeGreaterThan(0);
+  await expect.poll(async () => (await ruler.boundingBox())!.y).toBeCloseTo(rulerTop, 0);
+  await expect.poll(async () => (await header.boundingBox())!.y).toBeCloseTo(headerTop, 0);
+  await expect.poll(async () => (await playheadMarker.boundingBox())!.y).toBeCloseTo(playheadTop, 0);
+});
