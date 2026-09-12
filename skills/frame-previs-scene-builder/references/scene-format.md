@@ -9,7 +9,7 @@ The application imports one UTF-8 JSON object with `version: 1`. Unknown propert
 | `version` | literal `1` | File format version |
 | `name` | string, up to 100 characters recommended | Scene title |
 | `duration` | number, 0.1–600 | Scene duration in seconds |
-| `fps` | integer, 1–60 | Playback and export frame rate |
+| `fps` | integer: `17`, `24`, or `30` | Playback and export frame rate; default is 24 |
 | `resolution` | object | Even `width` 16–3840 and even `height` 16–2160 |
 | `output` | object | Canonical aspect-ratio and megapixel selections |
 | `objects` | array, up to 500 | Ordered scene objects |

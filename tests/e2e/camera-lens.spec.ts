@@ -12,6 +12,8 @@ test('camera field of view is keyed, interpolated, undoable and saved without mo
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'lens.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scene)) });
   await page.locator('.scene-list').getByRole('button', { name: /Camera 01/ }).click();
+  await expect(page.getByRole('spinbutton', { name: 'Cut start (sec)' })).toHaveCount(0);
+  await expect(page.getByRole('spinbutton', { name: 'Cut end (sec)' })).toHaveCount(0);
   await expect(page.locator('.subsection-title').filter({ hasText: 'CAMERA LENS' })).toBeVisible();
   const slider = page.getByRole('slider', { name: 'Field of view slider' });
   await expect(slider).toHaveValue('75');
@@ -53,4 +55,23 @@ test('camera tracks hard-cut, earlier starts win overlaps, and gaps render black
   const downloadEvent = page.waitForEvent('download'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   const saved = JSON.parse(readFileSync((await (await downloadEvent).path())!, 'utf8'));
   expect(saved.cameras[0].range.end).toBe(3); expect(saved.cameras[2].range).toEqual({ start: 3, end: 10 });
+});
+
+test('keeps every camera visible in the editor regardless of selection or timeline range', async ({ page }) => {
+  const scene = newProject(true);
+  scene.cameras[0].range = { start: 0, end: 1 };
+  scene.cameras.push({
+    id: 'camera-2', name: 'Camera 02', color: '#7db9ce', range: { start: 2, end: 3 },
+    keyframes: [{ time: 0, position: [-6, 3, 5], target: [0, 1, 0], fov: 40 }],
+  });
+  await page.goto('/');
+  await page.locator('input[type=file]').setInputFiles({ name: 'camera-helpers.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scene)) });
+  const editor = page.locator('.canvas-host');
+  await expect(editor).toHaveAttribute('data-camera-helpers', '2');
+  await page.locator('.scene-list').getByRole('button', { name: /Character A/ }).click();
+  await expect(page.getByRole('textbox', { name: 'Object name' })).toHaveValue('Character A');
+  const tracks = page.locator('.tracks'), box = await tracks.boundingBox();
+  await tracks.click({ position: { x: box!.width * .9, y: 15 } });
+  await expect(page.locator('.preview-heading')).toContainText('NO CAMERA');
+  await expect(editor).toHaveAttribute('data-camera-helpers', '2');
 });

@@ -6,6 +6,14 @@ test('scales assets per axis and uniformly, moves the live preview, and selects 
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/'); await expect(page.locator('.canvas-host')).toHaveAttribute('data-webgl', 'ready');
 
+  const moveTool = page.getByRole('button', { name: 'Move tool' });
+  const rotateTool = page.getByRole('button', { name: 'Rotate tool' });
+  await expect(moveTool).toHaveClass(/active/);
+  await page.locator('.canvas-host canvas').click({ button: 'middle', position: { x: 500, y: 250 } });
+  await expect(rotateTool).toHaveClass(/active/);
+  await page.locator('.canvas-host canvas').click({ button: 'middle', position: { x: 500, y: 250 } });
+  await expect(moveTool).toHaveClass(/active/);
+
   const preview = page.locator('.camera-preview'); const beforePreview = await preview.boundingBox();
   const heading = page.locator('.preview-heading'); const handle = await heading.boundingBox();
   await page.mouse.move(handle!.x + 30, handle!.y + handle!.height / 2); await page.mouse.down();
@@ -23,13 +31,18 @@ test('scales assets per axis and uniformly, moves the live preview, and selects 
 
   await page.getByRole('combobox', { name: 'Aspect ratio' }).selectOption('9:16 portrait');
   await page.getByRole('combobox', { name: 'Megapixels' }).selectOption('0.4');
+  const frameRate = page.getByRole('combobox', { name: 'Frame rate' });
+  await expect(frameRate).toHaveValue('24');
+  await expect(frameRate.locator('option')).toHaveText(['17', '24', '30']);
+  await frameRate.selectOption('17'); await expect(frameRate).toHaveValue('17');
+  await frameRate.selectOption('30'); await expect(frameRate).toHaveValue('30');
   const resolution = calculateResolution('9:16 portrait', '0.4');
   await expect(page.locator('.format-tag')).toContainText(`${resolution.width} × ${resolution.height}`);
 
   const downloadEvent = page.waitForEvent('download'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   const saved = JSON.parse(readFileSync((await (await downloadEvent).path())!, 'utf8'));
   expect(saved.objects[0].scale).toEqual([2, 3, 4]); expect(saved.objects[0].uniformScale).toBe(1.5);
-  expect(saved.output).toEqual({ aspectRatio: '9:16 portrait', megapixels: '0.4' }); expect(saved.resolution).toEqual(resolution);
+  expect(saved.output).toEqual({ aspectRatio: '9:16 portrait', megapixels: '0.4' }); expect(saved.resolution).toEqual(resolution); expect(saved.fps).toBe(30);
   expect(errors).toEqual([]);
 });
 

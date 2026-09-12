@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { activeCamera, calculateResolution, isObjectVisible, objectRange, newProject, removeCameraKey, sampleObject, sampleCamera, transformAroundCenter, upsert, upsertCameraKey, parseProject } from '../src/model';
 describe('scene and animation contract', () => {
+  it('uses 24 fps by default and accepts only the output frame-rate presets', () => {
+    const scene = newProject();
+    expect(scene.fps).toBe(24);
+    for (const fps of [17, 24, 30]) expect(parseProject({ ...scene, fps }).fps).toBe(fps);
+    for (const fps of [16, 23.976, 60]) expect(() => parseProject({ ...scene, fps })).toThrow();
+  });
   it('shows objects only in their half-open visibility interval, preserving keys', () => {
     const object = newProject(true).objects[0];
     expect(objectRange(object, 10)).toEqual({ start: 0, end: 10 });

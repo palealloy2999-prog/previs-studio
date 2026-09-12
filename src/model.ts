@@ -15,6 +15,7 @@ export function isObjectVisible(object: SceneObject, time: number, duration: num
 }
 export const aspectRatios = ['1:1 square', '3:4 portrait', '5:8 portrait', '9:16 portrait', '9:21 portrait', '4:3 landscape', '3:2 landscape', '16:9 landscape', '21:9 landscape'] as const;
 export const megapixels = ['0.2', '0.4', '0.6', '0.8', '1.0'] as const;
+export const fpsOptions = [17, 24, 30] as const;
 export type AspectRatio = typeof aspectRatios[number];
 export type Megapixels = typeof megapixels[number];
 export type Project = { version: 1; name: string; duration: number; fps: number; resolution: { width: number; height: number }; output: { aspectRatio: AspectRatio; megapixels: Megapixels }; objects: SceneObject[]; cameras: SceneCamera[]; groups: SceneGroup[] };
@@ -78,7 +79,7 @@ export function activeCamera(project: Project, time: number): SceneCamera | null
 export function newProject(demo = false): Project {
   const first: ObjectKey = { time: 0, position: [-2, 0, 0], rotation: [0, 25, 0] };
   const output = { aspectRatio: '16:9 landscape' as const, megapixels: '0.8' as const };
-  return { version: 1, name: demo ? 'First encounter' : 'Untitled scene', duration: 10, fps: 30, resolution: calculateResolution(output.aspectRatio, output.megapixels), output, objects: demo ? [
+  return { version: 1, name: demo ? 'First encounter' : 'Untitled scene', duration: 10, fps: 24, resolution: calculateResolution(output.aspectRatio, output.megapixels), output, objects: demo ? [
     { id: 'character-a', name: 'Character A', asset: primitives[0], color: palette[0], scale: [1, 1, 1], uniformScale: 1, keyframes: [first, { ...first, time: 5, position: [0, 0, 0], rotation: [0, 60, 0] }, { ...first, time: 10, position: [1, 0, -1], rotation: [0, 90, 0] }] },
     { id: 'character-b', name: 'Character B', asset: primitives[0], color: palette[1], scale: [1, 1, 1], uniformScale: 1, keyframes: [{ time: 0, position: [2, 0, -1], rotation: [0, -55, 0] }, { time: 10, position: [2, 0, -1], rotation: [0, -55, 0] }] },
     { id: 'box-a', name: 'Box', asset: primitives[1], color: palette[2], scale: [1, 1, 1], uniformScale: 1, keyframes: [{ time: 0, position: [-2.5, 0, -3], rotation: [0, 15, 0] }] },
@@ -95,7 +96,7 @@ export function parseProject(raw: unknown): Project {
   if (p.version !== 1) fail(t('model.version'));
   const duration = number(p.duration, 0.1, 600);
   const fps = number(p.fps, 1, 60);
-  if (!Number.isInteger(fps)) fail(t('model.fps'));
+  if (!Number.isInteger(fps) || !fpsOptions.includes(fps as typeof fpsOptions[number])) fail(t('model.fps'));
   const res = record(p.resolution);
   const width = number(res.width, 16, 3840), height = number(res.height, 16, 2160);
   if (width % 2 || height % 2) fail(t('model.resolution'));

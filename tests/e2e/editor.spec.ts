@@ -79,7 +79,7 @@ test('keyed camera FOV and real H.264 MP4 export', async ({ page }) => {
   const video = await downloadEvent; const videoPath = test.info().outputPath('preview.mp4'); await video.saveAs(videoPath);
   expect(readFileSync(videoPath).length).toBeGreaterThan(10000);
   const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', videoPath], { encoding: 'utf8' }));
-  expect(probe.streams[0].codec_name).toBe('h264'); expect(probe.streams[0].width).toBe(scene.resolution.width); expect(probe.streams[0].height).toBe(scene.resolution.height); expect(probe.streams[0].nb_frames).toBe('30'); expect(probe.streams[0].r_frame_rate).toBe('30/1'); expect(Number(probe.format.duration)).toBeCloseTo(1, 1);
+  expect(probe.streams[0].codec_name).toBe('h264'); expect(probe.streams[0].width).toBe(scene.resolution.width); expect(probe.streams[0].height).toBe(scene.resolution.height); expect(probe.streams[0].nb_frames).toBe(String(scene.fps)); expect(probe.streams[0].r_frame_rate).toBe(`${scene.fps}/1`); expect(Number(probe.format.duration)).toBeCloseTo(1, 1);
   execFileSync('ffmpeg', ['-v', 'error', '-i', videoPath, '-f', 'null', '-']);
   await expect(page.locator('.modal-backdrop')).toHaveCount(0); expect(errors).toEqual([]);
 });
@@ -96,34 +96,30 @@ test('production build automatically includes GLB bytes and relative asset URLs'
 
 test('visibility trims affect preview and encoded frames and survive JSON reload', async ({ page }) => {
   const scene = newProject(); scene.duration = 3;
-  scene.objects = [{ id: 'timed-box', name: 'Timed Box', asset: 'primitive:box', color: '#ff0000', scale: [1, 1, 1], uniformScale: 1, keyframes: [0, 1, 2].map(time => ({ time, position: [0, 0, 0], rotation: [0, 0, 0] })) }];
+  scene.objects = [{ id: 'timed-box', name: 'Timed Box', asset: 'primitive:box', color: '#ff0000', scale: [1, 1, 1], uniformScale: 1, visibility: { start: 1, end: 2 }, keyframes: [0, 1, 2].map(time => ({ time, position: [0, 0, 0], rotation: [0, 0, 0] })) }];
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'timed.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scene)) });
-  const start = page.getByRole('spinbutton', { name: 'Visible from (sec)' });
-  const end = page.getByRole('spinbutton', { name: 'Visible until (sec)' });
-  await start.fill('1'); await start.press('Enter'); await end.fill('2'); await end.press('Enter');
-  await expect(page.getByText('Outside range · hidden', { exact: true })).toBeVisible();
+  await expect(page.getByRole('spinbutton', { name: 'Visible from (sec)' })).toHaveCount(0);
   const preview = page.locator('.preview-canvas canvas');
   const before = await preview.screenshot();
   await page.getByRole('button', { name: 'Timed Box key at 1.00 seconds', exact: true }).click();
-  await expect(page.getByText('Visible', { exact: true })).toBeVisible();
   const during = await preview.screenshot(); expect(during.equals(before)).toBe(false);
   await page.getByRole('button', { name: 'Timed Box key at 2.00 seconds', exact: true }).click();
-  await expect(page.getByText('Outside range · hidden', { exact: true })).toBeVisible();
   expect((await preview.screenshot()).equals(before)).toBe(true);
 
-  // Trim with the actual pointer-captured handle, then return it using the numeric field.
+  // Trim with the pointer-captured timeline handle and show its current time while dragging.
   const handle = page.getByRole('button', { name: 'Timed Box visibility start' });
   const box = await handle.boundingBox(); const tracks = await page.locator('.tracks').boundingBox();
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.down();
-  await page.mouse.move(box!.x + box!.width / 2 + tracks!.width / 6, box!.y + box!.height / 2, { steps: 5 }); await page.mouse.up();
-  await expect(start).toHaveValue('1.5');
-  await start.fill('1'); await start.press('Enter');
+  await page.mouse.move(box!.x + box!.width / 2 + tracks!.width / 6, box!.y + box!.height / 2, { steps: 5 });
+  await expect(page.getByRole('tooltip')).toHaveText('START 1.50s');
+  await page.mouse.up(); await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await page.keyboard.press('Control+z');
   const saveEvent = page.waitForEvent('download'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   const json = readFileSync((await (await saveEvent).path())!, 'utf8');
   expect(JSON.parse(json).objects[0].visibility).toEqual({ start: 1, end: 2 });
   await page.locator('input[type=file]').setInputFiles({ name: 'restored.json', mimeType: 'application/json', buffer: Buffer.from(json) });
-  await expect(start).toHaveValue('1'); await expect(end).toHaveValue('2');
+  await expect(page.getByRole('spinbutton', { name: 'Visible until (sec)' })).toHaveCount(0);
   const videoEvent = page.waitForEvent('download'); await page.getByRole('button', { name: 'Export MP4' }).click();
   const videoPath = test.info().outputPath('visibility.mp4'); await (await videoEvent).saveAs(videoPath);
   const redPixels = (time: number) => {
@@ -157,12 +153,12 @@ test('Delete, Undo and Redo preserve edits and group timeline drags', async ({ p
 
   // A multi-move drag must require exactly one undo.
   const handle = page.getByRole('button', { name: 'Character A visibility start' });
-  const box = await handle.boundingBox(); const tracks = await page.locator('.tracks').boundingBox();
+  const box = await handle.boundingBox(); const initialHandleX = box!.x; const tracks = await page.locator('.tracks').boundingBox();
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.down();
   await page.mouse.move(box!.x + box!.width / 2 + tracks!.width / 5, box!.y + box!.height / 2, { steps: 12 }); await page.mouse.up();
-  const start = page.getByRole('spinbutton', { name: 'Visible from (sec)' });
-  await expect(start).toHaveValue('2'); await page.keyboard.press('Control+z'); await expect(start).toHaveValue('0');
-  await page.keyboard.press('Control+y'); await expect(start).toHaveValue('2');
+  await expect.poll(async () => (await handle.boundingBox())!.x).toBeGreaterThan(initialHandleX + 10);
+  await page.keyboard.press('Control+z'); await expect.poll(async () => (await handle.boundingBox())!.x).toBeCloseTo(initialHandleX, 0);
+  await page.keyboard.press('Control+y'); await expect.poll(async () => (await handle.boundingBox())!.x).toBeGreaterThan(initialHandleX + 10);
   await page.getByRole('button', { name: 'Camera 01 key at 0.00 seconds', exact: true }).click();
   await page.keyboard.press('Delete'); await expect(page.locator('.tracks .track').last().locator('.keyframe')).toHaveCount(1);
   await expect(page.getByRole('status')).toContainText('The last keyframe cannot be deleted');

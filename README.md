@@ -44,6 +44,7 @@ JSON rotations use degrees. The coordinate system is Y-up, and the mannequin fac
 | Zoom editor camera | Mouse wheel |
 | Move LIVE preview | Drag its header; double-click to reset |
 | Move / rotate gizmo | W / E |
+| Switch move / rotate gizmo | Middle-click in the editor view |
 | Focus selection | F |
 | Play / pause | Space |
 | Seek | Click or drag the timeline |
@@ -67,7 +68,7 @@ Drag rows in Scene or Timeline to reorder them. Dropping above or below a row co
 
 Keyframe interpolation is applied from each key to the next. Poses are held before the first and after the last key. Rotation uses Euler-angle interpolation, so turns greater than 360 degrees are supported. Keys outside a shortened scene duration are preserved.
 
-Set an object's visible start and end in the Inspector or drag the ends of its timeline strip. A `2–5` second range is visible at `2 <= time < 5` in the editor, camera preview, and MP4. Hidden objects keep their animation keys.
+Drag the ends of an object's timeline strip to set its visible start and end. A tooltip shows the exact time while dragging. A `2–5` second range is visible at `2 <= time < 5` in the editor, camera preview, and MP4. Hidden objects keep their animation keys.
 
 ## Scale
 
@@ -81,7 +82,7 @@ JSON stores only safe relative GLB paths, so the same files must exist on anothe
 
 ## Camera cuts and field of view
 
-Each camera has its own animated position, target, FOV, and active range. Range boundaries create frame-accurate hard cuts. When ranges overlap, the camera with the earlier start time wins; equal starts use Scene order. Times with no assigned camera render black in both preview and MP4.
+Each camera has its own animated position, target, FOV, and active range. Drag the camera strip ends in the timeline to change its range; the drag tooltip shows the exact time. Range boundaries create frame-accurate hard cuts. When ranges overlap, the camera with the earlier start time wins; equal starts use Scene order. Times with no assigned camera render black in both preview and MP4.
 
 FOV is stored in camera keyframes. For example, 75° at 0 seconds and 25° at 3 seconds creates an interpolated zoom. The Inspector also provides 75°, 50°, and 25° presets.
 
@@ -89,7 +90,7 @@ FOV is stored in camera keyframes. For example, 75° at 0 seconds and 25° at 3 
 
 Choose 1:1, 3:4, 5:8, 9:16, 9:21, 4:3, 3:2, 16:9, or 21:9 and a target size from 0.2 to 1.0 MP. The editor computes even pixel dimensions for H.264 and applies them to LIVE preview and MP4 export.
 
-MP4 output uses Mediabunny, CanvasSource, and WebCodecs. It renders at exact `frame / fps` times and excludes the editor grid, camera helpers, selection outlines, and gizmos.
+MP4 output uses Mediabunny, CanvasSource, and WebCodecs. The default frame rate is 24 fps, with 17 and 30 fps available from the FPS menu. It renders at exact `frame / fps` times and excludes the editor grid, camera helpers, selection outlines, and gizmos.
 
 ## LLM scene generation
 

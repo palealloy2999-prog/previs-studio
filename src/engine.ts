@@ -5,7 +5,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { activeCamera, isObjectVisible, sampleCamera, sampleObject, type CameraKey, type ObjectKey, type Project, type Vec3 } from './model';
 import { t } from './i18n';
 
-type Callbacks = { select: (id: string, additive: boolean) => void; transform: (id: string, key: ObjectKey | CameraKey) => void; transformGroup: (id: string, move: Vec3, turn: Vec3) => void; error: (message: string) => void; beginEdit?: () => void; endEdit?: () => void };
+type Callbacks = { select: (id: string, additive: boolean) => void; transform: (id: string, key: ObjectKey | CameraKey) => void; transformGroup: (id: string, move: Vec3, turn: Vec3) => void; toggleMode: () => void; error: (message: string) => void; beginEdit?: () => void; endEdit?: () => void };
 const deg = THREE.MathUtils.radToDeg;
 export class SceneEngine {
   scene = new THREE.Scene();
@@ -16,10 +16,8 @@ export class SceneEngine {
   orbit: OrbitControls;
   transform: TransformControls;
   helpers = new THREE.Group();
-  cameraRig = new THREE.Group();
+  cameraRigs = new Map<string, { rig: THREE.Group; helperCamera: THREE.PerspectiveCamera; frustum: THREE.CameraHelper }>();
   groupRig = new THREE.Group();
-  frustum: THREE.CameraHelper;
-  private helperCamera = new THREE.PerspectiveCamera();
   objects = new Map<string, THREE.Group>();
   pending = new Set<Promise<void>>();
   failures = new Map<string, string>();
@@ -54,20 +52,14 @@ export class SceneEngine {
     this.editor.position.set(9, 6.5, 11);
     this.orbit = new OrbitControls(this.editor, this.renderer.domElement);
     this.orbit.target.set(0, 1, 0); this.orbit.enableDamping = false;
+    this.orbit.mouseButtons.MIDDLE = -1 as THREE.MOUSE;
     this.scene.add(new THREE.HemisphereLight(0xe2efff, 0x55524a, 2.5));
     const sun = new THREE.DirectionalLight(0xffecd5, 3.2); sun.position.set(5, 12, 7); sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -18, right: 18, top: 18, bottom: -18 }); sun.shadow.normalBias = 0.03; this.scene.add(sun);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: '#303a3e', roughness: 1 })); ground.rotation.x = -Math.PI / 2; ground.position.y = -0.025; ground.receiveShadow = true; this.scene.add(ground);
     const grid = new THREE.GridHelper(100, 100, 0x687777, 0x424e52); this.helpers.add(grid, new THREE.AxesHelper(2));
-    this.cameraRig.userData.id = 'camera-1';
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.4), new THREE.MeshStandardMaterial({ color: '#a6c88a' }));
-    const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.12, 0.3, 16), new THREE.MeshStandardMaterial({ color: '#738c62' })); lens.rotation.x = Math.PI / 2; lens.position.z = -0.3;
-    this.cameraRig.add(body, lens); this.helpers.add(this.cameraRig);
     const groupPivot = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 10), new THREE.MeshBasicMaterial({ color: '#e8b880', depthTest: false }));
     groupPivot.renderOrder = 10; this.groupRig.add(groupPivot); this.groupRig.visible = false; this.helpers.add(this.groupRig);
-    this.frustum = new THREE.CameraHelper(this.helperCamera);
-    this.frustum.setColors(new THREE.Color('#75876d'), new THREE.Color('#a1b58c'), new THREE.Color('#839777'), new THREE.Color('#637563'), new THREE.Color('#637563'));
-    this.helpers.add(this.frustum);
     this.selection.visible = false; this.helpers.add(this.selection); this.scene.add(this.helpers, this.camera);
     this.transform = new TransformControls(this.editor, this.renderer.domElement);
     this.transform.setSize(0.85); this.helpers.add(this.transform.getHelper());
@@ -105,12 +97,15 @@ export class SceneEngine {
     const frame = () => { if (this.disposed) return; this.raf = requestAnimationFrame(frame); if (this.exporting) return; this.orbit.update(); this.render(); }; frame();
   }
   private down = { x: 0, y: 0, gizmo: false };
-  private pointerDown = (event: PointerEvent) => { this.down = { x: event.clientX, y: event.clientY, gizmo: !!this.transform.axis }; };
+  private pointerDown = (event: PointerEvent) => {
+    this.down = { x: event.clientX, y: event.clientY, gizmo: !!this.transform.axis };
+    if (event.button === 1 && !this.showCamera) { event.preventDefault(); this.callbacks.toggleMode(); }
+  };
   private pointerUp = (event: PointerEvent) => {
     if (this.showCamera || event.button !== 0 || this.down.gizmo || Math.hypot(event.clientX - this.down.x, event.clientY - this.down.y) > 4) return;
     const rect = this.renderer.domElement.getBoundingClientRect(); const ray = new THREE.Raycaster();
     ray.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1), this.editor);
-    const pickable = [...this.objects.values()].filter(node => node.visible).concat(this.cameraRig);
+    const pickable = [...this.objects.values()].filter(node => node.visible).concat([...this.cameraRigs.values()].map(value => value.rig));
     if (this.groupRig.visible) pickable.push(this.groupRig);
     const hits = ray.intersectObjects(pickable, true);
     if (hits.length) { let node: THREE.Object3D | null = hits[0].object; while (node && !node.userData.id) node = node.parent; if (node) this.callbacks.select(node.userData.id, event.shiftKey); }
@@ -126,6 +121,10 @@ export class SceneEngine {
     this.project = project; this.time = time; this.selected = selected; this.selectedIds = selectedIds; this.showCamera = cameraView;
     this.orbit.enabled = !cameraView && !this.transform.dragging;
     for (const [id, node] of this.objects) if (!project.objects.some(o => o.id === id && o.asset === node.userData.asset)) { this.transform.detach(); this.scene.remove(node); disposeNode(node); this.objects.delete(id); this.failures.delete(id); }
+    for (const [id, visual] of this.cameraRigs) if (!project.cameras.some(camera => camera.id === id)) {
+      if (this.transform.object === visual.rig) this.transform.detach();
+      this.helpers.remove(visual.rig, visual.frustum); disposeNode(visual.rig); visual.frustum.dispose(); this.cameraRigs.delete(id);
+    }
     for (const object of project.objects) {
       let node = this.objects.get(object.id);
       if (!node) {
@@ -146,12 +145,16 @@ export class SceneEngine {
       }
       if (node.userData.color !== object.color) { colorNode(node, object.color); node.userData.color = object.color; }
     }
+    for (const camera of project.cameras) {
+      let visual = this.cameraRigs.get(camera.id);
+      if (!visual) { visual = makeCameraVisual(camera.id, camera.color); this.cameraRigs.set(camera.id, visual); this.helpers.add(visual.rig, visual.frustum); }
+      if (visual.rig.userData.color !== camera.color) { colorNode(visual.rig, camera.color); visual.rig.userData.color = camera.color; }
+    }
     this.applyTime(time);
     const selectedCamera = project.cameras.find(camera => camera.id === selected);
     const selectedGroup = project.groups.find(group => group.id === selected);
-    this.cameraRig.userData.id = selectedCamera?.id ?? '';
     this.groupRig.userData.id = selectedGroup?.id ?? '';
-    const target = selectedGroup ? this.groupRig : selectedCamera ? this.cameraRig : this.objects.get(selected);
+    const target = selectedGroup ? this.groupRig : selectedCamera ? this.cameraRigs.get(selectedCamera.id)?.rig : this.objects.get(selected);
     this.transform.setMode(mode);
     if (target?.visible && !cameraView) { if (this.transform.object !== target) this.transform.attach(target); }
     else this.transform.detach();
@@ -171,13 +174,14 @@ export class SceneEngine {
       this.camera.position.fromArray(key.position); this.camera.lookAt(new THREE.Vector3(...key.target)); this.camera.fov = key.fov; this.camera.aspect = this.project.resolution.width / this.project.resolution.height; this.camera.updateProjectionMatrix(); this.camera.updateMatrixWorld();
     }
     const selectedCamera = this.project.cameras.find(camera => camera.id === this.selected);
-    this.cameraRig.visible = !!selectedCamera;
-    this.frustum.visible = !!selectedCamera;
-    if (selectedCamera) {
-      const key = sampleCamera(selectedCamera.keyframes, time);
-      this.helperCamera.position.fromArray(key.position); this.helperCamera.lookAt(new THREE.Vector3(...key.target)); this.helperCamera.fov = key.fov; this.helperCamera.aspect = this.project.resolution.width / this.project.resolution.height; this.helperCamera.far = 4; this.helperCamera.updateProjectionMatrix(); this.helperCamera.updateMatrixWorld(); this.frustum.update();
-      if (!this.transform.dragging || this.transform.object !== this.cameraRig) { this.cameraRig.position.copy(this.helperCamera.position); this.cameraRig.quaternion.copy(this.helperCamera.quaternion); }
+    for (const camera of this.project.cameras) {
+      const visual = this.cameraRigs.get(camera.id); if (!visual) continue;
+      const key = sampleCamera(camera.keyframes, time), { helperCamera, rig, frustum } = visual;
+      rig.visible = true; frustum.visible = true;
+      helperCamera.position.fromArray(key.position); helperCamera.lookAt(new THREE.Vector3(...key.target)); helperCamera.fov = key.fov; helperCamera.aspect = this.project.resolution.width / this.project.resolution.height; helperCamera.far = 4; helperCamera.updateProjectionMatrix(); helperCamera.updateMatrixWorld(); frustum.update();
+      if (!this.transform.dragging || this.transform.object !== rig) { rig.position.copy(helperCamera.position); rig.quaternion.copy(helperCamera.quaternion); }
     }
+    this.host.dataset.cameraHelpers = String(this.cameraRigs.size);
     const selectedGroup = this.project.groups.find(group => group.id === this.selected);
     const members = selectedGroup?.objectIds.map(id => this.objects.get(id)).filter((node): node is THREE.Group => !!node?.visible) ?? [];
     this.groupRig.visible = members.length > 0;
@@ -185,7 +189,7 @@ export class SceneEngine {
       const center = members.reduce((sum, node) => sum.add(node.position), new THREE.Vector3()).multiplyScalar(1 / members.length);
       this.groupRig.position.copy(center); this.groupRig.rotation.set(0, 0, 0);
     }
-    const selected = selectedGroup ? this.groupRig : selectedCamera ? this.cameraRig : this.objects.get(this.selected);
+    const selected = selectedGroup ? this.groupRig : selectedCamera ? this.cameraRigs.get(selectedCamera.id)?.rig : this.objects.get(this.selected);
     this.selection.visible = !!selected?.visible;
     if (selected) this.selection.setFromObject(selected);
     const secondaryIds = new Set(selectedGroup ? selectedGroup.objectIds : this.selectedIds.slice(1));
@@ -242,6 +246,16 @@ function disposeNode(root: THREE.Object3D) {
   root.traverse(node => { if (node instanceof THREE.Mesh || node instanceof THREE.LineSegments) { node.geometry?.dispose(); for (const material of Array.isArray(node.material) ? node.material : [node.material]) { for (const value of Object.values(material)) if (value instanceof THREE.Texture) textures.add(value); material.dispose(); } } }); textures.forEach(t => t.dispose());
 }
 function makeMissing() { const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#ff6680', wireframe: true })); mesh.position.y = 0.5; mesh.userData.fixedColor = true; return mesh; }
+function makeCameraVisual(id: string, color: string) {
+  const rig = new THREE.Group(); rig.userData = { id, color };
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.4), new THREE.MeshStandardMaterial({ color }));
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.12, 0.3, 16), new THREE.MeshStandardMaterial({ color })); lens.rotation.x = Math.PI / 2; lens.position.z = -0.3;
+  rig.add(body, lens);
+  const helperCamera = new THREE.PerspectiveCamera();
+  const frustum = new THREE.CameraHelper(helperCamera);
+  frustum.setColors(new THREE.Color('#75876d'), new THREE.Color('#a1b58c'), new THREE.Color('#839777'), new THREE.Color('#637563'), new THREE.Color('#637563'));
+  return { rig, helperCamera, frustum };
+}
 function makePrimitive(asset: string): THREE.Group {
   const group = new THREE.Group(); const material = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.72 });
   const add = (geometry: THREE.BufferGeometry, x: number, y: number, z: number) => { const mesh = new THREE.Mesh(geometry, material); mesh.position.set(x, y, z); group.add(mesh); return mesh; };
