@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs';
 
 async function saveScene(page: import('@playwright/test').Page) {
   const downloadEvent = page.waitForEvent('download');
-  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   return JSON.parse(readFileSync((await (await downloadEvent).path())!, 'utf8'));
 }
 
 test('creates a scene folder and moves objects into and out of it by drag and drop', async ({ page }) => {
   await page.goto('/');
   const scene = page.locator('.scene-list');
-  await page.getByRole('button', { name: 'フォルダを追加' }).click();
+  await page.getByRole('button', { name: 'Add folder' }).click();
   const folder = scene.locator('.scene-group').first();
   await expect(folder).toContainText('Group 01');
 
@@ -31,9 +31,9 @@ test('groups a multi-selection from the edit view context menu and Delete ungrou
   await scene.getByRole('button', { name: /Character A/ }).click();
   await scene.getByRole('button', { name: /Character B/ }).click({ modifiers: ['Shift'] });
   await page.locator('.canvas-host').click({ button: 'right', position: { x: 400, y: 250 } });
-  await expect(page.getByRole('heading', { name: '選択オブジェクトをグループ化' })).toBeVisible();
-  await page.getByRole('textbox', { name: '新しいグループ名' }).fill('Actors');
-  await page.getByRole('button', { name: 'グループ化', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Group selected objects' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'New group name' }).fill('Actors');
+  await page.getByRole('button', { name: 'Create group', exact: true }).click();
 
   const folder = scene.locator('.scene-group');
   await expect(folder).toContainText('Actors');

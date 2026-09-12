@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/palealloy2999-prog/Pre-visEditer/blob/main/skills/frame-previs-scene-builder/references/scene.schema.json",
+  "title": "FRAME Previs Studio scene version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name", "duration", "fps", "resolution", "output", "objects", "cameras", "groups"],
+  "properties": {
+    "version": { "const": 1 },
+    "name": { "type": "string", "maxLength": 100 },
+    "duration": { "type": "number", "minimum": 0.1, "maximum": 600 },
+    "fps": { "type": "integer", "minimum": 1, "maximum": 60 },
+    "resolution": { "$ref": "#/$defs/resolution" },
+    "output": { "$ref": "#/$defs/output" },
+    "objects": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/object" } },
+    "cameras": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/camera" } },
+    "groups": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/group" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+    "number": { "type": "number", "minimum": -1000000, "maximum": 1000000 },
+    "vec3": {
+      "type": "array",
+      "prefixItems": [
+        { "$ref": "#/$defs/number" },
+        { "$ref": "#/$defs/number" },
+        { "$ref": "#/$defs/number" }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "positiveVec3": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+        { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+        { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "easing": { "enum": ["linear", "ease-in", "ease-out", "ease-in-out"] },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "type": "number", "minimum": 0, "maximum": 600 },
+        "end": { "type": "number", "minimum": 0, "maximum": 600 }
+      }
+    },
+    "objectKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "position", "rotation"],
+      "properties": {
+        "time": { "type": "number", "minimum": 0, "maximum": 600 },
+        "position": { "$ref": "#/$defs/vec3" },
+        "rotation": { "$ref": "#/$defs/vec3" },
+        "easing": { "$ref": "#/$defs/easing" }
+      }
+    },
+    "cameraKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "position", "target", "fov"],
+      "properties": {
+        "time": { "type": "number", "minimum": 0, "maximum": 600 },
+        "position": { "$ref": "#/$defs/vec3" },
+        "target": { "$ref": "#/$defs/vec3" },
+        "fov": { "type": "number", "minimum": 5, "maximum": 150 },
+        "easing": { "$ref": "#/$defs/easing" }
+      }
+    },
+    "asset": {
+      "oneOf": [
+        { "enum": ["primitive:mannequin", "primitive:box", "primitive:sphere", "primitive:cylinder", "primitive:triangle", "primitive:tetrahedron"] },
+        { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)(?!.*:)(?!.*\\\\).+\\.glb$" }
+      ]
+    },
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "asset", "color", "keyframes", "scale", "uniformScale"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/id" },
+        "asset": { "$ref": "#/$defs/asset" },
+        "color": { "$ref": "#/$defs/color" },
+        "scale": { "$ref": "#/$defs/positiveVec3" },
+        "uniformScale": { "type": "number", "minimum": 0.001, "maximum": 1000 },
+        "visibility": { "$ref": "#/$defs/range" },
+        "keyframes": { "type": "array", "minItems": 1, "maxItems": 20000, "items": { "$ref": "#/$defs/objectKey" } }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "color", "range", "keyframes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/id" },
+        "color": { "$ref": "#/$defs/color" },
+        "range": { "$ref": "#/$defs/range" },
+        "keyframes": { "type": "array", "minItems": 1, "maxItems": 20000, "items": { "$ref": "#/$defs/cameraKey" } }
+      }
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "objectIds"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/id" },
+        "objectIds": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 16, "maximum": 3840, "multipleOf": 2 },
+        "height": { "type": "integer", "minimum": 16, "maximum": 2160, "multipleOf": 2 }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aspectRatio", "megapixels"],
+      "properties": {
+        "aspectRatio": { "enum": ["1:1 square", "3:4 portrait", "5:8 portrait", "9:16 portrait", "9:21 portrait", "4:3 landscape", "3:2 landscape", "16:9 landscape", "21:9 landscape"] },
+        "megapixels": { "enum": ["0.2", "0.4", "0.6", "0.8", "1.0"] }
+      }
+    }
+  }
+}

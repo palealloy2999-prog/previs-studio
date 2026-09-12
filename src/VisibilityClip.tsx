@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { clamp, type VisibilityRange } from './model';
+import { t } from './i18n';
 
 export default function VisibilityClip({ range, duration, fps, color, name, onChange, onBegin, onEnd }: {
   range: VisibilityRange; duration: number; fps: number; color: string; name: string;
@@ -10,10 +11,10 @@ export default function VisibilityClip({ range, duration, fps, color, name, onCh
   const left = clamp(range.start / duration * 100, 0, 100);
   const right = clamp(range.end / duration * 100, 0, 100);
   if (right <= left) return null;
-  return <div className="visibility-clip" aria-label={`${name} 表示区間`} title={`${range.start.toFixed(2)}–${range.end.toFixed(2)}秒（終了時刻は非表示）`}
+  return <div className="visibility-clip" aria-label={t('visibility.range', { name })} title={t('visibility.title', { start: range.start.toFixed(2), end: range.end.toFixed(2) })}
     style={{ left: `${left}%`, width: `${right - left}%`, color }}>
     {(['start', 'end'] as const).map(edge => <button key={edge} className={`visibility-handle ${edge}`}
-      aria-label={`${name} 表示${edge === 'start' ? '開始' : '終了'}をドラッグ`}
+      aria-label={t(edge === 'start' ? 'visibility.dragStart' : 'visibility.dragEnd', { name })}
       onPointerDown={e => {
         if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
         onBegin();

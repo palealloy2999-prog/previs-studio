@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 
 async function saveScene(page: import('@playwright/test').Page) {
-  const downloadEvent = page.waitForEvent('download'); await page.getByRole('button', { name: '保存', exact: true }).click();
+  const downloadEvent = page.waitForEvent('download'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   return JSON.parse(readFileSync((await (await downloadEvent).path())!, 'utf8'));
 }
 
@@ -35,7 +35,7 @@ test('reorders objects inside a Scene folder', async ({ page }) => {
   await scene.getByRole('button', { name: /Character A/ }).click();
   await scene.getByRole('button', { name: /Character B/ }).click({ modifiers: ['Shift'] });
   await page.locator('.canvas-host').click({ button: 'right', position: { x: 400, y: 250 } });
-  await page.getByRole('button', { name: 'グループ化', exact: true }).click();
+  await page.getByRole('button', { name: 'Create group', exact: true }).click();
   const members = scene.locator('.group-children .object-row'), second = await members.nth(1).boundingBox();
   await members.nth(0).dragTo(members.nth(1), { targetPosition: { x: second!.width / 2, y: second!.height - 2 } });
   await expect(members.nth(0)).toContainText('Character B'); await expect(members.nth(1)).toContainText('Character A');

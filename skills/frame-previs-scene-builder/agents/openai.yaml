@@ -1,0 +1,4 @@
+interface:
+  display_name: "FRAME Scene Builder"
+  short_description: "Build importable FRAME previs scene JSON"
+  default_prompt: "Create a valid FRAME Previs Studio scene JSON from my shot description."

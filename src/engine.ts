@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { activeCamera, isObjectVisible, sampleCamera, sampleObject, type CameraKey, type ObjectKey, type Project, type Vec3 } from './model';
+import { t } from './i18n';
 
 type Callbacks = { select: (id: string, additive: boolean) => void; transform: (id: string, key: ObjectKey | CameraKey) => void; transformGroup: (id: string, move: Vec3, turn: Vec3) => void; error: (message: string) => void; beginEdit?: () => void; endEdit?: () => void };
 const deg = THREE.MathUtils.radToDeg;
@@ -47,8 +48,8 @@ export class SceneEngine {
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       host.setAttribute('data-webgl', 'ready');
     }
-    this.renderer.domElement.setAttribute('aria-label', '3D編集ビュー');
-    this.preview.domElement.setAttribute('aria-label', '本番カメラプレビュー');
+    this.renderer.domElement.setAttribute('aria-label', t('engine.editorCanvas'));
+    this.preview.domElement.setAttribute('aria-label', t('engine.previewCanvas'));
     host.append(this.renderer.domElement); previewHost.append(this.preview.domElement);
     this.editor.position.set(9, 6.5, 11);
     this.orbit = new OrbitControls(this.editor, this.renderer.domElement);
@@ -138,7 +139,7 @@ export class SceneEngine {
             task = new GLTFLoader().loadAsync(url).then(gltf => {
               if (this.disposed || this.objects.get(object.id) !== root) { disposeNode(gltf.scene); return; }
               root.add(gltf.scene); colorNode(root, this.project.objects.find(o => o.id === object.id)?.color ?? object.color);
-            }).catch(() => { if (this.objects.get(object.id) === root) { const message = `GLBの読み込みに失敗: ${object.asset}`; this.failures.set(object.id, message); root.add(makeMissing()); this.callbacks.error(message); } }).finally(() => this.pending.delete(task));
+            }).catch(() => { if (this.objects.get(object.id) === root) { const message = t('error.glbLoad', { asset: object.asset }); this.failures.set(object.id, message); root.add(makeMissing()); this.callbacks.error(message); } }).finally(() => this.pending.delete(task));
             this.pending.add(task);
           }
         }
@@ -206,10 +207,10 @@ export class SceneEngine {
   }
   async exportMP4(onProgress: (progress: number) => void, signal: AbortSignal): Promise<Blob> {
     await Promise.all(this.pending);
-    if (this.failures.size) throw new Error('読み込めないGLBがあります。アセットを確認してから書き出してください。');
+    if (this.failures.size) throw new Error(t('error.glbMissing'));
     const { Output, BufferTarget, CanvasSource, Mp4OutputFormat, canEncodeVideo } = await import('mediabunny');
     const { width, height } = this.project.resolution; const fps = this.project.fps;
-    if (!await canEncodeVideo('avc', { width, height, bitrate: 6_000_000 })) throw new Error('このブラウザはH.264書き出しに対応していません。最新のChromeまたはEdgeで開いてください。');
+    if (!await canEncodeVideo('avc', { width, height, bitrate: 6_000_000 })) throw new Error(t('error.h264'));
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setSize(width, height); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.toneMapping = THREE.ACESFilmicToneMapping;
     const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
     const source = new CanvasSource(renderer.domElement, { codec: 'avc', bitrate: 6_000_000 }); output.addVideoTrack(source, { frameRate: fps });
@@ -217,7 +218,7 @@ export class SceneEngine {
     try {
       await output.start(); const frames = Math.ceil(this.project.duration * fps);
       for (let frame = 0; frame < frames; frame++) {
-        if (signal.aborted) throw new Error('書き出しをキャンセルしました。');
+        if (signal.aborted) throw new Error(t('error.exportCanceled'));
         this.applyTime(frame / fps); this.helpers.visible = false; if (this.hasActiveCamera) renderer.render(this.scene, this.camera); else { renderer.setClearColor(0x000000); renderer.clear(); }
         await source.add(frame / fps, Math.min(1 / fps, this.project.duration - frame / fps));
         onProgress((frame + 1) / frames);

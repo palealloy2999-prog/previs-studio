@@ -1,3 +1,5 @@
+import { t } from './i18n';
+
 export type Vec3 = [number, number, number];
 export type Ease = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
 export type ObjectKey = { time: number; position: Vec3; rotation: Vec3; easing?: Ease };
@@ -84,70 +86,70 @@ export function newProject(demo = false): Project {
 }
 
 export function parseProject(raw: unknown): Project {
-  const fail = (message: string): never => { throw new Error(`JSONを読み込めません: ${message}`); };
-  const record = (v: unknown): Record<string, unknown> => { if (!v || typeof v !== 'object' || Array.isArray(v)) return fail('オブジェクト形式が不正です。'); return v as Record<string, unknown>; };
-  const number = (v: unknown, min = -1e6, max = 1e6): number => { if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max) return fail('数値が範囲外です。'); return v; };
-  const vector = (v: unknown): Vec3 => { if (!Array.isArray(v) || v.length !== 3) return fail('XYZは3要素の配列が必要です。'); return v.map(x => number(x)) as Vec3; };
-  const str = (v: unknown): string => typeof v === 'string' && v.length > 0 && v.length <= 500 ? v : fail('文字列が不正です。');
+  const fail = (message: string): never => { throw new Error(t('model.load', { message })); };
+  const record = (v: unknown): Record<string, unknown> => { if (!v || typeof v !== 'object' || Array.isArray(v)) return fail(t('model.record')); return v as Record<string, unknown>; };
+  const number = (v: unknown, min = -1e6, max = 1e6): number => { if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max) return fail(t('model.number')); return v; };
+  const vector = (v: unknown): Vec3 => { if (!Array.isArray(v) || v.length !== 3) return fail(t('model.vector')); return v.map(x => number(x)) as Vec3; };
+  const str = (v: unknown): string => typeof v === 'string' && v.length > 0 && v.length <= 500 ? v : fail(t('model.string'));
   const p = record(raw);
-  if (p.version !== 1) fail('対応するversionは1です。');
+  if (p.version !== 1) fail(t('model.version'));
   const duration = number(p.duration, 0.1, 600);
   const fps = number(p.fps, 1, 60);
-  if (!Number.isInteger(fps)) fail('FPSは整数にしてください。');
+  if (!Number.isInteger(fps)) fail(t('model.fps'));
   const res = record(p.resolution);
   const width = number(res.width, 16, 3840), height = number(res.height, 16, 2160);
-  if (width % 2 || height % 2) fail('解像度は偶数にしてください。');
+  if (width % 2 || height % 2) fail(t('model.resolution'));
   const keys = (v: unknown, camera: boolean): (ObjectKey | CameraKey)[] => {
-    if (!Array.isArray(v) || !v.length || v.length > 20000) return fail('キーフレームが必要です（上限20,000）。');
+    if (!Array.isArray(v) || !v.length || v.length > 20000) return fail(t('model.keys'));
     const result = v.map(value => { const k = record(value); const time = number(k.time, 0, 600); const position = vector(k.position); const easing = k.easing ?? 'linear';
-      if (!['linear', 'ease-in', 'ease-out', 'ease-in-out'].includes(easing as string)) fail('補間方式が不正です。');
+      if (!['linear', 'ease-in', 'ease-out', 'ease-in-out'].includes(easing as string)) fail(t('model.easing'));
       if (!camera) return { time, position, rotation: vector(k.rotation), easing: easing as Ease };
       return { time, position, target: vector(k.target), fov: number(k.fov, 5, 150), easing: easing as Ease };
     }).sort((a, b) => a.time - b.time);
-    if (result.some((k, i) => i && Math.abs(k.time - result[i - 1].time) < 0.00001)) fail('同じ時刻のキーが重複しています。');
+    if (result.some((k, i) => i && Math.abs(k.time - result[i - 1].time) < 0.00001)) fail(t('model.duplicateKey'));
     return result;
   };
-  if (!Array.isArray(p.objects) || p.objects.length > 500) return fail('objects配列が不正です（上限500）。');
+  if (!Array.isArray(p.objects) || p.objects.length > 500) return fail(t('model.objects'));
   const objects = p.objects.map(value => { const o = record(value); const asset = str(o.asset); const color = str(o.color);
-    if (!primitives.includes(asset) && (!/\.glb$/i.test(asset) || asset.startsWith('/') || asset.includes('..') || asset.includes(':') || asset.includes('\\'))) fail('GLB相対パスが不正です。');
-    if (!/^#[0-9a-f]{6}$/i.test(color)) fail('色は#RRGGBBで指定してください。');
+    if (!primitives.includes(asset) && (!/\.glb$/i.test(asset) || asset.startsWith('/') || asset.includes('..') || asset.includes(':') || asset.includes('\\'))) fail(t('model.assetPath'));
+    if (!/^#[0-9a-f]{6}$/i.test(color)) fail(t('model.color'));
     let visibility: VisibilityRange | undefined;
     if (o.visibility !== undefined) {
       const range = record(o.visibility);
       visibility = { start: number(range.start, 0, 600), end: number(range.end, 0, 600) };
-      if (visibility.end <= visibility.start) fail('表示終了は表示開始より後にしてください。');
+      if (visibility.end <= visibility.start) fail(t('model.visibility'));
     }
     const scale = o.scale === undefined ? [1, 1, 1] as Vec3 : vector(o.scale);
-    if (scale.some(value => value <= 0 || value > 1000)) fail('スケールは0より大きく1000以下にしてください。');
+    if (scale.some(value => value <= 0 || value > 1000)) fail(t('model.scale'));
     const uniformScale = o.uniformScale === undefined ? 1 : number(o.uniformScale, 0.001, 1000);
     return { id: str(o.id), name: str(o.name), asset, color, scale, uniformScale, keyframes: keys(o.keyframes, false) as ObjectKey[], ...(visibility ? { visibility } : {}) };
   });
-  if (new Set(objects.map(o => o.id)).size !== objects.length) fail('オブジェクトIDが重複しています。');
+  if (new Set(objects.map(o => o.id)).size !== objects.length) fail(t('model.objectId'));
   const cameraValues = Array.isArray(p.cameras) ? p.cameras : p.camera !== undefined ? [{ id: 'camera-1', name: 'Camera 01', color: '#b6c797', range: { start: 0, end: duration }, keyframes: record(p.camera).keyframes }] : [];
-  if (cameraValues.length > 50) fail('カメラは50台までです。');
+  if (cameraValues.length > 50) fail(t('model.cameraLimit'));
   const cameras = cameraValues.map((value, index) => {
     const c = record(value); const rangeValue = c.range === undefined ? { start: 0, end: duration } : record(c.range);
     const range = { start: number(rangeValue.start, 0, 600), end: number(rangeValue.end, 0, 600) };
-    if (range.end <= range.start) fail('カメラの終了は開始より後にしてください。');
+    if (range.end <= range.start) fail(t('model.cameraRange'));
     return { id: str(c.id), name: str(c.name), color: typeof c.color === 'string' && /^#[0-9a-f]{6}$/i.test(c.color) ? c.color : palette[(index + 2) % palette.length], range, keyframes: keys(c.keyframes, true) as CameraKey[] };
   });
   const ids = [...objects.map(o => o.id), ...cameras.map(c => c.id)];
-  if (new Set(ids).size !== ids.length) fail('オブジェクトまたはカメラのIDが重複しています。');
+  if (new Set(ids).size !== ids.length) fail(t('model.entityId'));
   const rawGroups = p.groups === undefined ? [] : p.groups;
-  if (!Array.isArray(rawGroups) || rawGroups.length > 100) fail('groups配列が不正です（上限100）。');
+  if (!Array.isArray(rawGroups) || rawGroups.length > 100) fail(t('model.groups'));
   const groupValues = rawGroups as unknown[];
   const assigned = new Set<string>();
   const groups = groupValues.map(value => {
     const g = record(value), rawObjectIds = g.objectIds;
-    if (!Array.isArray(rawObjectIds)) fail('グループのobjectIdsが不正です。');
+    if (!Array.isArray(rawObjectIds)) fail(t('model.groupIds'));
     const objectIds = (rawObjectIds as unknown[]).map(str);
-    if (new Set(objectIds).size !== objectIds.length || objectIds.some(id => !objects.some(o => o.id === id) || assigned.has(id))) fail('グループ内のオブジェクトIDが不正または重複しています。');
+    if (new Set(objectIds).size !== objectIds.length || objectIds.some(id => !objects.some(o => o.id === id) || assigned.has(id))) fail(t('model.groupMember'));
     objectIds.forEach(id => assigned.add(id));
     return { id: str(g.id), name: str(g.name), objectIds };
   });
-  if (new Set([...ids, ...groups.map(g => g.id)]).size !== ids.length + groups.length) fail('グループIDが重複しています。');
+  if (new Set([...ids, ...groups.map(g => g.id)]).size !== ids.length + groups.length) fail(t('model.groupId'));
   const outputValue = p.output === undefined ? inferOutput(width, height) : record(p.output);
-  const aspectRatio = aspectRatios.includes(outputValue.aspectRatio as AspectRatio) ? outputValue.aspectRatio as AspectRatio : fail('出力比率が不正です。');
-  const megapixelValue = megapixels.includes(outputValue.megapixels as Megapixels) ? outputValue.megapixels as Megapixels : fail('出力サイズが不正です。');
+  const aspectRatio = aspectRatios.includes(outputValue.aspectRatio as AspectRatio) ? outputValue.aspectRatio as AspectRatio : fail(t('model.aspect'));
+  const megapixelValue = megapixels.includes(outputValue.megapixels as Megapixels) ? outputValue.megapixels as Megapixels : fail(t('model.megapixels'));
   return { version: 1, name: typeof p.name === 'string' ? p.name.slice(0, 100) : 'Imported scene', duration, fps, resolution: { width, height }, output: { aspectRatio, megapixels: megapixelValue }, objects, cameras, groups };
 }

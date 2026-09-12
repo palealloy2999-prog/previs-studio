@@ -1,124 +1,101 @@
 # FRAME — Previs Studio
 
-WebGLプリビズツール MVP仕様書に沿った、ローカルで使う3Dプリビズエディターです。React / TypeScript / Vite / Three.jsで実装しています。
+[English](README.md) | [日本語](README.ja.md)
 
-## 起動
+A local 3D previs editor built with React, TypeScript, Vite, and Three.js. It follows `WebGLプリビズツール MVP仕様書.md` and runs entirely in the browser.
 
-Node.js 22.12以降（推奨24）で、プロジェクトフォルダーから実行します。
+## Start
+
+Use Node.js 22.12 or later (Node.js 24 recommended):
 
 ```powershell
 npm install
 npm run dev
 ```
 
-表示された `http://127.0.0.1:5173` をChromeまたはEdgeで開きます。依存パッケージをインストール済みなら、`start.cmd` のダブルクリックでも起動できます。
+Open the displayed `http://127.0.0.1:5173` URL in Chrome or Edge. After dependencies are installed, you can also double-click `start.cmd`.
 
 ```powershell
 npm run build
 npm run preview
 ```
 
-ビルド成果物は `dist/` です。ファイルを直接開くのではなくHTTPサーバーで配信してください。MP4書き出しにはWebCodecs / H.264エンコード対応ブラウザと、localhostまたはHTTPSが必要です。音声は出力しません。
+The production build is written to `dist/` and must be served over HTTP. MP4 export requires a browser with WebCodecs and H.264 encoding support, running on localhost or HTTPS. Exported videos do not contain audio.
 
-## 使い方
+The editing interface stays in English. Help and error messages follow the browser's primary language: Japanese for `ja` locales and English for all other locales.
 
-1. AssetsからMannequin、Box、Sphere、Cylinder、三角形、四面体またはGLBを追加します。
-2. オブジェクトを選び、ギズモまたは右の数値欄で位置・回転を設定します。数値はEnterまたはフォーカスを外すと確定します。
-3. タイムラインを別の時刻へドラッグし、位置・回転を変更します。現在時刻にキーを自動登録します。「キーフレームを追加」でも現在の姿勢を記録できます。
-4. カメラでは位置・注視点・FOVを編集します。ギズモでの回転は注視点に変換されます。
-5. カット時刻へ移動して「現在時刻にカメラを追加」を押すと、その時刻で新しいカメラへハードカットします。
-6. 再生して本番カメラのプレビューを確認し、MP4を書き出します。
-7. JSONを保存すると後から編集できます。JSONの回転は度数、座標系はY-up、人型の正面は+Zです。
+## Basic workflow
 
-初回は2人の移動を含むサンプルシーンを表示します。「新規」は空のシーンとカメラを作成します。編集内容はこのブラウザのlocalStorageにも自動保存します。新規作成・JSON読み込みは現在のシーンを置き換えるため、残すシーンは事前にJSON保存してください。
+1. Add a mannequin, primitive, or GLB from Assets.
+2. Select an object and set its position, rotation, and scale with the gizmo or Inspector.
+3. Move to another time and transform the object. A keyframe is recorded at the current time.
+4. Add cameras and edit their position, target, and field of view.
+5. Move to a cut time and add a camera to create a hard cut at that point.
+6. Preview the production camera, then export MP4 and save the editable scene as JSON.
 
-### 操作
+JSON rotations use degrees. The coordinate system is Y-up, and the mannequin faces +Z. The initial page shows a sample scene; New creates an empty scene with one camera. The editor also autosaves to browser localStorage. Save JSON before replacing a scene with New or Open.
 
-| 操作 | 方法 |
+## Controls
+
+| Action | Control |
 | --- | --- |
-| 編集カメラの回転 | 左ドラッグ |
-| 編集カメラの平行移動 | 右ドラッグ |
-| ズーム | ホイール |
-| LIVEプレビューの移動 | プレビュー上部をドラッグ（ダブルクリックで初期位置） |
-| 移動 / 回転ギズモ | W / E |
-| 選択対象に視点を合わせる | F |
-| 再生 / 一時停止 | Space |
-| 時間移動 | タイムラインをクリック・ドラッグ |
-| キー選択 | タイムラインのダイヤをクリック |
-| キー削除 | 対象キーに移動しInspectorのごみ箱 |
-| キー削除（キーボード） | ダイヤをクリックして選択しDelete |
-| 複数選択 | Scene一覧、タイムライン、編集ビューでShift+クリック |
-| フォルダを追加 | Scene見出し右側のフォルダアイコン |
-| フォルダへ出し入れ | フォルダへドロップして格納、フォルダ外の行や空白へドロップして取り出す |
-| Scene／タイムラインの並び替え | 行をドラッグし、挿入したい行の上半分または下半分へドロップ |
-| Assetsの開閉 | ASSETS見出し右側の＋／×をクリック |
-| 選択対象をグループ化 | 2個以上を選択して編集ビューを右クリック |
-| コピー / 貼り付け | Ctrl+C / Ctrl+V |
-| 選択対象の削除 | キーを選択していない状態でDelete |
-| 元に戻す | Ctrl+Z、または上部の戻るボタン |
-| やり直す | Ctrl+Y / Ctrl+Shift+Z、または上部の進むボタン |
+| Orbit editor camera | Left-drag |
+| Pan editor camera | Right-drag |
+| Zoom editor camera | Mouse wheel |
+| Move LIVE preview | Drag its header; double-click to reset |
+| Move / rotate gizmo | W / E |
+| Focus selection | F |
+| Play / pause | Space |
+| Seek | Click or drag the timeline |
+| Multi-select | Shift+click in Scene, Timeline, or the editor view |
+| Copy / paste | Ctrl+C / Ctrl+V |
+| Delete selected keys or items | Delete |
+| Undo | Ctrl+Z |
+| Redo | Ctrl+Y or Ctrl+Shift+Z |
 
-Undo／Redoは直近100操作まで記録します。オブジェクト操作、キー編集、表示区間、カメラ、シーン設定、新規作成・JSON読み込みを戻せます。ギズモ・表示区間のドラッグや名前の入力は1操作にまとめます。新しい編集をするとRedo履歴は破棄します。再生や時間移動は履歴に含めず、Undo／Redo時には再生を停止します。履歴はページの再読み込みでリセットされます。
+Undo and redo retain the latest 100 operations. Text inputs keep their normal editing shortcuts. Every object and camera retains at least one keyframe as its base pose.
 
-入力欄にフォーカスがある間はDeleteやCtrl+Zを通常の文字編集として扱います。各オブジェクト・カメラの最後の1キーは基準姿勢のため残します。
+The first selected item is the primary selection. Moving or rotating it applies the same delta to the other selected items, preserving their existing offsets and angles.
 
-Scene一覧、タイムラインのトラック、編集ビューではShift+クリックでオブジェクトまたはカメラを追加選択できます。最初に選択した対象が主選択です。主選択へ加えた位置・回転の差分を他の選択対象にも加算するため、それぞれの元の位置・角度関係を保って移動します。主選択は左端のアクセント線、追加選択は青色、編集ビューでは追加選択の境界線で区別します。
+## Groups and ordering
 
-Scene見出しのフォルダアイコンで空のグループを作成できます。オブジェクトをフォルダへドラッグすると格納され、フォルダ外の行やScene一覧の空白へドラッグするとルートへ取り出せます。2個以上のオブジェクトをShift+クリックで選択し、編集ビューを右クリックして名前を入力する方法でも作成できます。グループを選ぶとメンバー全体の中心にギズモが表示され、移動と回転を各メンバーへ差分として記録します。フォルダのDeleteまたは「グループ解除」はフォルダだけを削除し、メンバーはシーンに残します。
+Use the folder button beside the Scene heading to create an empty group. Drag objects into or out of folders freely. You can also Shift+click two or more objects and right-click the editor view to create a group around their shared center. Moving or rotating the group transforms every member around that center. Deleting or ungrouping a folder leaves its objects in the scene.
 
-Scene一覧とタイムラインの行はドラッグ＆ドロップで並び替えられます。行の上半分へ落とすと直前、下半分へ落とすと直後へ移動します。どちらで変更してもSceneとタイムラインの順番が同期します。フォルダ内の行へ落とすと、そのフォルダへ移動してメンバー順も更新します。カメラ同士も同じ操作で並び替えられます。
+Drag rows in Scene or Timeline to reorder them. Dropping above or below a row controls insertion order, and both panels stay synchronized. Drop an object on a folder row to add it to that folder. Use the button beside the Assets heading to collapse the asset browser and give Scene more room.
 
-ASSETS見出し右側のボタンでアセット一覧を開閉できます。閉じるとASSETSは見出しだけになり、空いた高さをScene一覧へ割り当てます。
+## Animation and visibility
 
-キーを明示選択してCtrl+Cを押すと、その時刻にある選択トラックのキーをコピーし、別の時刻でCtrl+Vを押すと貼り付けます。キーを選択していない場合はオブジェクトやカメラ本体を複製し、X方向へ1移動して貼り付けます。Deleteはキー選択中ならキーを削除し、それ以外では選択したオブジェクト／カメラをまとめて削除します。いずれもUndo／Redoに対応します。
+Keyframe interpolation is applied from each key to the next. Poses are held before the first and after the last key. Rotation uses Euler-angle interpolation, so turns greater than 360 degrees are supported. Keys outside a shortened scene duration are preserved.
 
-補間方式はそのキーから次のキーへ適用されます。最初のキーより前・最後のキーより後は姿勢を保持します。回転はEuler角を線形補間するため、360度以上の回転も設定できます。長さを短縮しても範囲外のキーは保持し、長さを戻せば再び表示します。
+Set an object's visible start and end in the Inspector or drag the ends of its timeline strip. A `2–5` second range is visible at `2 <= time < 5` in the editor, camera preview, and MP4. Hidden objects keep their animation keys.
 
-編集ビューの回転・平行移動・ズームには慣性を適用せず、入力を止めた位置で停止します。
+## Scale
 
-### アセットのサイズ
+The Inspector provides independent X, Y, and Z scale plus a uniform multiplier. If XYZ is `2, 1, 0.5` and uniform scale is `1.5`, the displayed scale is `3, 1.5, 0.75`. Changes update the viewport immediately and are saved in JSON.
 
-オブジェクトを選択すると、Inspectorの「SIZE」でX・Y・Zのスケールを個別に変更できます。「全体倍率」は3軸へ同時に乗算されます。例えばXYZが `2, 1, 0.5`、全体倍率が `1.5` の場合、実際の表示倍率は `3, 1.5, 0.75` です。設定はJSONへ保存され、旧JSONにはXYZと全体倍率の初期値1を補完します。
+## External models
 
-### オブジェクトの表示区間
+Place `.glb` files anywhere under `assets/models/`. Vite scans the directory recursively and adds them to Assets without a hand-written manifest. Restart the development server if a change is not detected; rebuild after adding models to a production build.
 
-オブジェクトを選択し、Inspectorの「表示開始（秒）」「表示終了（秒）」を設定します。タイムライン下側の色付き帯の両端をドラッグしても変更できます。端を選択して左右矢印キーで1フレームずつ調整できます。
+JSON stores only safe relative GLB paths, so the same files must exist on another computer. Missing models appear as wireframes and block video export. GLB materials remain independent per object and can be tinted. Embedded glTF animation, Draco, and KTX2 decoding are not included.
 
-例えば2–5秒なら、2秒以上・5秒未満だけ表示します。編集ビュー、本番カメラ、MP4のすべてに適用され、範囲外のオブジェクトの影・選択枠・ギズモも消えます。Scene一覧からは引き続き選択・編集できます。範囲外の動きのキーは薄く表示して保持します。
+## Camera cuts and field of view
 
-設定はJSONの各オブジェクトの `visibility: { "start": 2, "end": 5 }` に保存され、複製時にも引き継ぎます。未設定の既存JSONはシーン全体で表示します。「シーン全体に戻す」で未設定に戻せます。表示区間を指定した後はシーンの長さを変えても時刻を保持します。
+Each camera has its own animated position, target, FOV, and active range. Range boundaries create frame-accurate hard cuts. When ranges overlap, the camera with the earlier start time wins; equal starts use Scene order. Times with no assigned camera render black in both preview and MP4.
 
-### 外部モデル
+FOV is stored in camera keyframes. For example, 75° at 0 seconds and 25° at 3 seconds creates an interpolated zoom. The Inspector also provides 75°, 50°, and 25° presets.
 
-`.glb` を `assets/models/` 以下に置くだけで、Viteが再帰走査して一覧を生成します。開発時は追加・削除でページを再読み込みします（直前の編集は自動保存を待ってください）。確実に反映するには開発サーバーを再起動します。ビルド後にモデルを追加した場合は再ビルドします。
+## Aspect ratio and output size
 
-- manifestの手動編集は不要です。
-- ファイル名の `_` / `-` を空白に変換して表示します。
-- モデルの単位・原点・大きさは元のGLBを保持します。
-- GLBのマテリアルはオブジェクトごとに独立し、色を変更できます。テクスチャがある場合は乗算されます。
-- JSONには相対パスのみ保存します。別のPCでも同じ相対パスにモデルが必要です。
-- 不足したGLBはエラーとワイヤーフレームで表示します。JSON編集は継続できますが、動画出力はモデルを修復するまで停止します。
-- GLB内部のアニメーションは再生しません。自己完結したglTF 2.0 Binaryを使用してください。Draco / KTX2圧縮モデルのデコーダーは同梱していません。
+Choose 1:1, 3:4, 5:8, 9:16, 9:21, 4:3, 3:2, 16:9, or 21:9 and a target size from 0.2 to 1.0 MP. The editor computes even pixel dimensions for H.264 and applies them to LIVE preview and MP4 export.
 
-### カメラカットと画角
+MP4 output uses Mediabunny, CanvasSource, and WebCodecs. It renders at exact `frame / fps` times and excludes the editor grid, camera helpers, selection outlines, and gizmos.
 
-複数のカメラを作成でき、それぞれが独立した位置・注視点・FOV・使用区間を持ちます。使用区間の境界では補間せず、フレーム単位でハードカットします。タイムラインのカメラ帯の両端、またはInspectorの開始・終了時刻で区間を変更できます。
+## LLM scene generation
 
-カメラ区間が重なった場合は、開始時刻が先のカメラを優先します。開始時刻も同じ場合はScene一覧で先にあるカメラを使います。どのカメラにも割り当てられていない区間は、プレビューとMP4の両方で黒になります。旧形式の単一カメラJSONは、シーン全体を使うCamera 01として読み込みます。
+The repository includes the [`frame-previs-scene-builder`](skills/frame-previs-scene-builder/SKILL.md) Skill for creating importable version 1 scene JSON from shot descriptions. Its references contain the complete field contract, semantic rules, an example, and a JSON Schema. Install or copy the Skill into an LLM agent environment that supports `SKILL.md`, then ask it to build a FRAME scene.
 
-カメラを選択すると、Inspectorの「CAMERA LENS」で画角（FOV）を5〜120度の範囲で調整できます。広角75°、標準50°、望遠25°のボタンも用意しています。
-
-画角はカメラキーフレームの一部です。例えば0秒で75°、3秒で25°に設定すると、その間を補間して徐々にズームします。画角変更時にも現在時刻へカメラキーを自動登録します。カメラモーション専用の開始・終了時間や追加パラメータはありません。
-
-### 画面比率と書き出しサイズ
-
-画面上部の「比率」と「サイズ」から、1:1、3:4、5:8、9:16、9:21、4:3、3:2、16:9、21:9、および0.2〜1.0 MPを選択できます。目標画素数を `MP × 1024²` として比率に沿う辺長を求め、H.264で扱えるよう幅・高さを偶数ピクセルに丸めます。表示された解像度がLIVEプレビューとMP4へ適用されます。
-
-### MP4
-
-MediabunnyのCanvasSourceとWebCodecsで、時間を `frame / fps` に固定して1枚ずつ描画・H.264エンコードします。編集用グリッド、カメラ本体、Frustum、ギズモは出力しません。出力中は進捗表示とキャンセルが可能です。シーンの初期設定は10秒、16:9、0.8 MP、30fpsです。エンコーダー非対応は明示的にエラー表示します。
-
-## 検証コマンド
+## Validation
 
 ```powershell
 npm test
@@ -126,14 +103,16 @@ npm run build
 npm run test:e2e
 ```
 
-E2Eテストはインストール済みのMicrosoft Edgeと、PATHにある `ffprobe` / `ffmpeg` を使います。テストが必要な開発サーバーを自動起動します。GLBテスト用の一時モデルを生成し、検証後に削除します。
+E2E tests use installed Microsoft Edge and `ffprobe` / `ffmpeg` on PATH. They start the development server and create and remove a temporary GLB fixture.
 
-## 主な構成
+## Main files
 
-- `src/model.ts`: JSON形式、検証、キー補間、カメラカットの優先判定
-- `src/engine.ts`: Three.js、GLB、ギズモ、カメラ、MP4出力
-- `src/App.tsx`: 編集UI、再生、タイムライン、保存・復元
-- `src/SceneTree.tsx`: Scene一覧、グループフォルダ、ドラッグ＆ドロップ
-- `vite.config.ts`: GLB一覧の自動生成とビルドへの同梱
+- `src/model.ts`: scene JSON parsing, validation, interpolation, and camera priority
+- `src/engine.ts`: Three.js viewport, GLB loading, gizmos, cameras, and MP4 export
+- `src/App.tsx`: editor UI, playback, timeline, and persistence
+- `src/locales/`: English and Japanese interface text
+- `src/SceneTree.tsx`: scene list, group folders, and drag-and-drop ordering
+- `skills/frame-previs-scene-builder/`: LLM instructions and scene JSON schema
+- `vite.config.ts`: automatic GLB discovery and production bundling
 
-実装時に参照した公式資料: [Three.js TransformControls](https://threejs.org/docs/pages/TransformControls.html)、[Mediabunny](https://mediabunny.dev/guide/quick-start)。
+Primary implementation references: [Three.js TransformControls](https://threejs.org/docs/pages/TransformControls.html) and [Mediabunny](https://mediabunny.dev/guide/quick-start).

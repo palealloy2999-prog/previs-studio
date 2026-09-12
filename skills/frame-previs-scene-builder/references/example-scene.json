@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "name": "Two-shot to close-up",
+  "duration": 8,
+  "fps": 30,
+  "resolution": { "width": 1222, "height": 686 },
+  "output": { "aspectRatio": "16:9 landscape", "megapixels": "0.8" },
+  "objects": [
+    {
+      "id": "actor-a", "name": "Actor A", "asset": "primitive:mannequin", "color": "#eaa36b",
+      "scale": [1, 1, 1], "uniformScale": 1, "visibility": { "start": 0, "end": 8 },
+      "keyframes": [
+        { "time": 0, "position": [-1.2, 0, 0], "rotation": [0, 20, 0], "easing": "ease-in-out" },
+        { "time": 8, "position": [-0.7, 0, -0.3], "rotation": [0, 35, 0], "easing": "linear" }
+      ]
+    },
+    {
+      "id": "actor-b", "name": "Actor B", "asset": "primitive:mannequin", "color": "#7db9ce",
+      "scale": [1, 1, 1], "uniformScale": 1,
+      "keyframes": [{ "time": 0, "position": [1.2, 0, 0], "rotation": [0, -25, 0], "easing": "linear" }]
+    }
+  ],
+  "cameras": [
+    {
+      "id": "camera-wide", "name": "Wide Two-shot", "color": "#b6c797", "range": { "start": 0, "end": 4 },
+      "keyframes": [{ "time": 0, "position": [0, 3, 8], "target": [0, 1, 0], "fov": 50, "easing": "linear" }]
+    },
+    {
+      "id": "camera-close", "name": "Actor A Close-up", "color": "#d99cba", "range": { "start": 4, "end": 8 },
+      "keyframes": [
+        { "time": 4, "position": [-2.2, 1.8, 3.6], "target": [-0.8, 1.35, 0], "fov": 42, "easing": "ease-in-out" },
+        { "time": 8, "position": [-1.9, 1.8, 3.1], "target": [-0.7, 1.35, -0.3], "fov": 32, "easing": "linear" }
+      ]
+    }
+  ],
+  "groups": [{ "id": "group-cast", "name": "Cast", "objectIds": ["actor-a", "actor-b"] }]
+}
