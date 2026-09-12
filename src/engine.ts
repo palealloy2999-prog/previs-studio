@@ -269,14 +269,12 @@ function makePrimitive(asset: string): THREE.Group {
   else if (asset === 'primitive:tetrahedron') add(new THREE.TetrahedronGeometry(0.85), 0, 0.7, 0);
   else {
     add(new THREE.SphereGeometry(0.23, 24, 16), 0, 1.8, 0);
-    add(new THREE.CapsuleGeometry(0.23, 0.45, 8, 16), 0, 1.26, 0).scale.z = 0.7;
+    add(new THREE.CapsuleGeometry(0.25, 0.9, 8, 16), 0, 0.95, 0).scale.z = 0.72;
+    const eyeMaterial = new THREE.MeshStandardMaterial({ color: '#171b1d', roughness: 0.8 });
     for (const side of [-1, 1]) {
-      add(new THREE.CapsuleGeometry(0.09, 0.46, 6, 12), side * 0.35, 1.23, 0).rotation.z = side * 0.12;
-      add(new THREE.CapsuleGeometry(0.11, 0.63, 6, 12), side * 0.15, 0.5, 0);
-      add(new THREE.BoxGeometry(0.2, 0.12, 0.35), side * 0.15, 0.08, 0.065);
+      const eye = add(new THREE.SphereGeometry(0.032, 12, 8), side * 0.075, 1.84, 0.22);
+      eye.material = eyeMaterial; eye.userData.fixedColor = true;
     }
-    const face = add(new THREE.BoxGeometry(0.18, 0.065, 0.09), 0, 1.82, 0.22); face.material = new THREE.MeshStandardMaterial({ color: '#283136' }); face.userData.fixedColor = true;
-    const nose = add(new THREE.ConeGeometry(0.05, 0.15, 3), 0, 1.75, 0.25); nose.rotation.x = Math.PI / 2;
   }
   return group;
 }
