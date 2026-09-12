@@ -50,6 +50,14 @@ test('keeps the timeline ruler fixed while tracks scroll vertically', async ({ p
   const body = page.locator('.timeline-body'), ruler = page.locator('.ruler'), header = page.locator('.track-label-top'), playheadMarker = page.locator('.playhead > span');
   const rulerTop = (await ruler.boundingBox())!.y, headerTop = (await header.boundingBox())!.y, playheadTop = (await playheadMarker.boundingBox())!.y;
   expect(Number(await page.locator('.playhead').evaluate(element => getComputedStyle(element).zIndex))).toBeGreaterThan(Number(await ruler.evaluate(element => getComputedStyle(element).zIndex)));
+  await expect(ruler).toHaveCSS('user-select', 'none');
+  const gutterCovers = await ruler.evaluate(element => ({
+    left: getComputedStyle(element, '::before').width,
+    right: getComputedStyle(element, '::after').width,
+    leftBackground: getComputedStyle(element, '::before').backgroundColor,
+    rightBackground: getComputedStyle(element, '::after').backgroundColor,
+  }));
+  expect(gutterCovers).toEqual({ left: '15px', right: '26px', leftBackground: 'rgb(23, 28, 31)', rightBackground: 'rgb(23, 28, 31)' });
   await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
   await expect.poll(async () => (await body.evaluate(element => element.scrollTop))).toBeGreaterThan(0);
   await expect.poll(async () => (await ruler.boundingBox())!.y).toBeCloseTo(rulerTop, 0);
