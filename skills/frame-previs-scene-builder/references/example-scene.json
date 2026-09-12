@@ -33,5 +33,8 @@
       ]
     }
   ],
-  "groups": [{ "id": "group-cast", "name": "Cast", "objectIds": ["actor-a", "actor-b"] }]
+  "groups": [{
+    "id": "group-cast", "name": "Cast", "objectIds": ["actor-a", "actor-b"],
+    "keyframes": [{ "time": 0, "position": [0, 0, 0], "rotation": [0, 0, 0], "easing": "linear" }]
+  }]
 }

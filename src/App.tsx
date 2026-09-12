@@ -1,12 +1,12 @@
-﻿import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { ArrowDownToLine, Box, Camera, Check, Circle, Copy, Crosshair, Diamond, FilePlus2, Folder, FolderOpen, Grid2X2, Maximize, Move3D, Pause, Play, Plus, Pyramid, Repeat2, Rotate3D, Save, SkipBack, Square, Trash2, Triangle, UserRound, X, Cylinder, Film, HelpCircle } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { ArrowDownToLine, Box, Camera, Check, ChevronDown, ChevronRight, Circle, Copy, Crosshair, Diamond, FilePlus2, Folder, FolderOpen, Grid2X2, Maximize, Move3D, Pause, Play, Plus, Pyramid, Repeat2, Rotate3D, Save, SkipBack, Square, Trash2, Triangle, UserRound, X, Cylinder, Film, HelpCircle } from 'lucide-react';
 import models from 'virtual:models';
 import { SceneEngine } from './engine';
 import SceneTree from './SceneTree';
 import VisibilityClip from './VisibilityClip';
 import { useProjectHistory } from './useProjectHistory';
 import { Undo2, Redo2 } from 'lucide-react';
-import { activeCamera, aspectRatios, calculateResolution, fpsOptions, megapixels, objectRange, type VisibilityRange, clamp, newProject, palette, parseProject, primitives, removeCameraKey, sampleCamera, sampleObject, transformAroundCenter, upsert, upsertCameraKey, type AspectRatio, type CameraKey, type Ease, type Megapixels, type ObjectKey, type Project, type SceneCamera, type SceneObject, type Vec3 } from './model';
+import { activeCamera, aspectRatios, calculateResolution, composeObjectPose, fpsOptions, megapixels, objectRange, type VisibilityRange, clamp, newProject, palette, parseProject, primitives, removeCameraKey, reparentObject, sampleCamera, sampleGroup, sampleObject, upsert, upsertCameraKey, type AspectRatio, type CameraKey, type Ease, type Megapixels, type ObjectKey, type Project, type SceneCamera, type SceneGroup, type SceneObject, type Vec3 } from './model';
 import { t } from './i18n';
 
 const assetNames = [t('asset.mannequin'), t('asset.box'), t('asset.sphere'), t('asset.cylinder'), t('asset.triangle'), t('asset.tetrahedron')];
@@ -18,7 +18,7 @@ const assetIcons = [UserRound, Box, Circle, Cylinder, Triangle, Pyramid];
 const STORAGE = 'frame-previs-v1';
 const MAX_VISIBLE_KEY_MARKERS = 1000;
 const TRACK_DRAG = 'application/x-frame-previs-track';
-type ClipboardData = { kind: 'entities'; objects: SceneObject[]; cameras: SceneCamera[] } | { kind: 'keys'; entries: { id: string; key: ObjectKey | CameraKey }[] };
+type ClipboardData = { kind: 'entities'; objects: SceneObject[]; cameras: SceneCamera[]; groups: SceneGroup[] } | { kind: 'keys'; entries: { id: string; key: ObjectKey | CameraKey }[] };
 const add3 = (a: Vec3, b: Vec3): Vec3 => a.map((value, i) => value + b[i]) as Vec3;
 const sub3 = (a: Vec3, b: Vec3): Vec3 => a.map((value, i) => value - b[i]) as Vec3;
 function reorderById<T extends { id: string }>(items: T[], draggedId: string, targetId?: string, after = false): T[] {
@@ -26,6 +26,21 @@ function reorderById<T extends { id: string }>(items: T[], draggedId: string, ta
   const next = items.filter(item => item.id !== draggedId); if (!targetId) return [...next, dragged];
   const targetIndex = next.findIndex(item => item.id === targetId); if (targetIndex < 0) return items;
   next.splice(targetIndex + (after ? 1 : 0), 0, dragged); return next;
+}
+function reorderManyById<T extends { id: string }>(items: T[], draggedIds: string[], targetId?: string, after = false): T[] {
+  const ids = new Set(draggedIds), dragged = items.filter(item => ids.has(item.id));
+  if (!dragged.length) return items;
+  const next = items.filter(item => !ids.has(item.id));
+  if (!targetId) return [...next, ...dragged];
+  const targetIndex = next.findIndex(item => item.id === targetId);
+  if (targetIndex < 0) return items;
+  next.splice(targetIndex + (after ? 1 : 0), 0, ...dragged);
+  return next;
+}
+function reparentTimes(project: Project, ...groups: (SceneGroup | undefined)[]): number[] {
+  if (!groups.some(group => group && group.keyframes.length > 1)) return [];
+  const frames = Math.ceil(project.duration * project.fps);
+  return Array.from({ length: frames + 1 }, (_, index) => Math.min(index / project.fps, project.duration));
 }
 function rotateDirectionBetween(direction: Vec3, from: Vec3, to: Vec3): Vec3 {
   const length = (v: Vec3) => Math.hypot(...v), fromLength = length(from), toLength = length(to), directionLength = length(direction);
@@ -74,6 +89,7 @@ export default function App() {
   const [groupDialog, setGroupDialog] = useState<{ objectIds: string[]; name: string } | null>(null);
   const [timelineDrop, setTimelineDrop] = useState<{ id: string; after: boolean } | null>(null);
   const [assetsCollapsed, setAssetsCollapsed] = useState(false);
+  const [collapsedTimelineGroups, setCollapsedTimelineGroups] = useState<Set<string>>(() => new Set());
   const host = useRef<HTMLDivElement>(null), previewHost = useRef<HTMLDivElement>(null);
   const engine = useRef<SceneEngine | null>(null), input = useRef<HTMLInputElement>(null), abort = useRef<AbortController | null>(null);
   const previewDrag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
@@ -89,6 +105,7 @@ export default function App() {
   const cameraSelected = !!camera;
   const liveCamera = activeCamera(project, time);
   const pose = object ? sampleObject(object.keyframes, time) : null;
+  const groupPose = group ? sampleGroup(group.keyframes, time) : null;
   const cameraPose = camera ? sampleCamera(camera.keyframes, time) : null;
   const liveCameraPose = liveCamera ? sampleCamera(liveCamera.keyframes, time) : null;
   const updateKey = useCallback((id: string, key: ObjectKey | CameraKey) => {
@@ -107,8 +124,8 @@ export default function App() {
       return p;
     });
   }, [setProject]);
-  const transformGroup = useCallback((id: string, move: Vec3, turn: Vec3) => {
-    setPlaying(false); setProject(p => { const group = p.groups.find(value => value.id === id); if (!group?.objectIds.length) return p; const members = group.objectIds.map(objectId => p.objects.find(object => object.id === objectId)).filter((object): object is SceneObject => !!object), poses = members.map(object => sampleObject(object.keyframes, stateRef.current.time)); if (!poses.length) return p; const transformed = transformAroundCenter(poses, move, turn), byId = new Map(members.map((object, index) => [object.id, transformed[index]])); return { ...p, objects: p.objects.map(object => { const next = byId.get(object.id); return next ? { ...object, keyframes: upsert(object.keyframes, next) } : object; }) }; });
+  const transformGroup = useCallback((id: string, key: ObjectKey) => {
+    setPlaying(false); setProject(p => ({ ...p, groups: p.groups.map(group => group.id === id ? { ...group, keyframes: upsert(group.keyframes, key) } : group) }));
   }, [setProject]);
   useEffect(() => {
     try {
@@ -152,6 +169,7 @@ export default function App() {
   }, [progress, help, project, selected, selectedIds, selectedKey, time, undo, redo]);
   const seek = (t: number) => { setPlaying(false); setSelectedKey(null); setTime(clamp(Math.round(t * project.fps) / project.fps, 0, project.duration)); };
   const changeObject = (patch: Partial<ObjectKey>) => { if (object && pose) updateKey(object.id, { ...pose, ...patch }); };
+  const changeGroup = (patch: Partial<ObjectKey>) => { if (group && groupPose) transformGroup(group.id, { ...groupPose, ...patch }); };
   const changeCamera = (patch: Partial<CameraKey>) => { if (camera && cameraPose) updateKey(camera.id, { ...cameraPose, ...patch }); };
   function changeRange(id: string, visibility: VisibilityRange) {
     setPlaying(false);
@@ -174,36 +192,75 @@ export default function App() {
     setProject(p => ({ ...p, objects: [...p.objects, { id, name: `${name} ${p.objects.filter(o => o.asset === asset).length + 1}`, asset, color: palette[p.objects.length % palette.length], scale: [1, 1, 1], uniformScale: 1, keyframes: [{ time: 0, position: [0, 0, 0], rotation: [0, 0, 0] }] }] })); setSelected(id); setPlaying(false); setNotice(t('notice.added', { name }));
   }
   function addGroup() {
-    const id = crypto.randomUUID(); setProject(p => ({ ...p, groups: [...p.groups, { id, name: `Group ${String(p.groups.length + 1).padStart(2, '0')}`, objectIds: [] }] })); setSelected(id); setNotice(t('notice.groupAdded'));
+    const id = crypto.randomUUID(); setProject(p => ({ ...p, groups: [...p.groups, { id, name: `Group ${String(p.groups.length + 1).padStart(2, '0')}`, objectIds: [], keyframes: [{ time: 0, position: [0, 0, 0], rotation: [0, 0, 0] }] }] })); setSelected(id); setNotice(t('notice.groupAdded'));
+  }
+  function addGroupFromSelection() {
+    const objectIds = selectedIds.filter(id => project.objects.some(object => object.id === id));
+    if (objectIds.length >= 2) createGroup(objectIds, ''); else addGroup();
   }
   function createGroup(objectIds: string[], name: string) {
     if (objectIds.length < 2) return; const id = crypto.randomUUID(), cleanName = name.trim() || `Group ${String(project.groups.length + 1).padStart(2, '0')}`;
-    setProject(p => ({ ...p, groups: [...p.groups.map(group => ({ ...group, objectIds: group.objectIds.filter(objectId => !objectIds.includes(objectId)) })), { id, name: cleanName, objectIds }] })); setGroupDialog(null); setSelected(id); setNotice(t('notice.groupCreated', { count: objectIds.length }));
-  }
-  function moveToGroup(objectId: string, groupId: string) {
-    setProject(p => ({ ...p, groups: p.groups.map(group => ({ ...group, objectIds: group.id === groupId ? [...group.objectIds.filter(id => id !== objectId), objectId] : group.objectIds.filter(id => id !== objectId) })) })); setNotice(t('notice.movedToFolder'));
-  }
-  function moveToEnd(id: string) {
-    setProject(p => p.objects.some(object => object.id === id) ? { ...p, objects: reorderById(p.objects, id), groups: p.groups.map(group => ({ ...group, objectIds: group.objectIds.filter(objectId => objectId !== id) })) } : p.cameras.some(camera => camera.id === id) ? { ...p, cameras: reorderById(p.cameras, id) } : p); setNotice(t('notice.reordered'));
-  }
-  function reorderEntity(draggedId: string, targetId: string, after: boolean) {
-    if (draggedId === targetId) return;
     setProject(p => {
-      if (p.objects.some(object => object.id === draggedId) && p.objects.some(object => object.id === targetId)) {
-        const targetGroup = p.groups.find(group => group.objectIds.includes(targetId));
-        const groups = p.groups.map(group => { const objectIds = group.objectIds.filter(id => id !== draggedId); if (group.id !== targetGroup?.id) return { ...group, objectIds }; const index = objectIds.indexOf(targetId); objectIds.splice(index + (after ? 1 : 0), 0, draggedId); return { ...group, objectIds }; });
-        return { ...p, objects: reorderById(p.objects, draggedId, targetId, after), groups };
+      const members = objectIds.map(objectId => p.objects.find(object => object.id === objectId)).filter((object): object is SceneObject => !!object);
+      const worldPositions = members.map(object => { const parent = p.groups.find(group => group.objectIds.includes(object.id)), local = sampleObject(object.keyframes, stateRef.current.time); return composeObjectPose(local, parent ? sampleGroup(parent.keyframes, stateRef.current.time) : undefined).position; });
+      const pivot = worldPositions.length ? worldPositions.reduce<Vec3>((sum, position) => add3(sum, position), [0, 0, 0]).map(value => value / worldPositions.length) as Vec3 : [0, 0, 0] as Vec3;
+      const nextGroup: SceneGroup = { id, name: cleanName, objectIds: members.map(object => object.id), keyframes: [{ time: 0, position: pivot, rotation: [0, 0, 0] }] };
+      const memberIds = new Set(nextGroup.objectIds);
+      return { ...p, objects: p.objects.map(object => { const from = p.groups.find(group => group.objectIds.includes(object.id)); return memberIds.has(object.id) ? reparentObject(object, from, nextGroup, reparentTimes(p, from, nextGroup)) : object; }), groups: [...p.groups.map(group => ({ ...group, objectIds: group.objectIds.filter(objectId => !memberIds.has(objectId)) })), nextGroup] };
+    }); setGroupDialog(null); setSelected(id); setNotice(t('notice.groupCreated', { count: objectIds.length }));
+  }
+  function moveToGroup(objectIds: string[], groupId: string) {
+    setProject(p => {
+      const requested = new Set(objectIds), orderedIds = p.objects.filter(object => requested.has(object.id)).map(object => object.id), to = p.groups.find(group => group.id === groupId);
+      if (!orderedIds.length || !to || orderedIds.every(id => to.objectIds.includes(id))) return p;
+      const movedIds = new Set(orderedIds);
+      let target = to;
+      if (to.keyframes.length === 1) {
+        const memberIds = new Set([...to.objectIds, ...orderedIds]);
+        const memberObjects = p.objects.filter(value => memberIds.has(value.id));
+        const worldPositions = memberObjects.map(value => { const parent = p.groups.find(group => group.objectIds.includes(value.id)); return composeObjectPose(sampleObject(value.keyframes, stateRef.current.time), parent ? sampleGroup(parent.keyframes, stateRef.current.time) : undefined).position; });
+        const pivot = worldPositions.reduce<Vec3>((sum, position) => add3(sum, position), [0, 0, 0]).map(value => value / worldPositions.length) as Vec3;
+        target = { ...to, keyframes: [{ ...to.keyframes[0], position: pivot }] };
       }
-      if (p.cameras.some(camera => camera.id === draggedId) && p.cameras.some(camera => camera.id === targetId)) return { ...p, cameras: reorderById(p.cameras, draggedId, targetId, after) };
+      const targetMemberIds = new Set(to.objectIds);
+      const targetOrder = [...to.objectIds, ...orderedIds.filter(id => !targetMemberIds.has(id))];
+      return { ...p, objects: p.objects.map(value => {
+        const from = p.groups.find(group => group.objectIds.includes(value.id));
+        if (movedIds.has(value.id) && from?.id !== target.id) return reparentObject(value, from, target, reparentTimes(p, from, target));
+        if (targetMemberIds.has(value.id) && target !== to) return reparentObject(value, to, target);
+        return value;
+      }), groups: p.groups.map(group => group.id === groupId ? { ...target, objectIds: targetOrder } : { ...group, objectIds: group.objectIds.filter(id => !movedIds.has(id)) }) };
+    }); setNotice(t('notice.movedToFolder'));
+  }
+  function moveToEnd(ids: string[]) {
+    setProject(p => {
+      const objectIds = ids.filter(id => p.objects.some(object => object.id === id));
+      if (objectIds.length) { const moved = new Set(objectIds); return { ...p, objects: reorderManyById(p.objects.map(value => { const from = p.groups.find(group => group.objectIds.includes(value.id)); return moved.has(value.id) && from ? reparentObject(value, from, undefined, reparentTimes(p, from)) : value; }), objectIds), groups: p.groups.map(group => ({ ...group, objectIds: group.objectIds.filter(objectId => !moved.has(objectId)) })) }; }
+      const cameraId = ids.find(id => p.cameras.some(camera => camera.id === id));
+      return cameraId ? { ...p, cameras: reorderById(p.cameras, cameraId) } : p;
+    }); setNotice(t('notice.reordered'));
+  }
+  function reorderEntity(draggedIds: string[], targetId: string, after: boolean) {
+    if (draggedIds.includes(targetId)) return;
+    setProject(p => {
+      const objectIds = draggedIds.filter(id => p.objects.some(object => object.id === id));
+      if (objectIds.length && p.objects.some(object => object.id === targetId)) {
+        const moved = new Set(objectIds), targetGroup = p.groups.find(group => group.objectIds.includes(targetId));
+        const groups = p.groups.map(group => { const ids = group.objectIds.filter(id => !moved.has(id)); if (group.id !== targetGroup?.id) return { ...group, objectIds: ids }; const index = ids.indexOf(targetId); ids.splice(index + (after ? 1 : 0), 0, ...objectIds); return { ...group, objectIds: ids }; });
+        const objects = p.objects.map(object => { if (!moved.has(object.id)) return object; const sourceGroup = p.groups.find(group => group.objectIds.includes(object.id)); return sourceGroup?.id !== targetGroup?.id ? reparentObject(object, sourceGroup, targetGroup, reparentTimes(p, sourceGroup, targetGroup)) : object; });
+        return { ...p, objects: reorderManyById(objects, objectIds, targetId, after), groups };
+      }
+      const cameraId = draggedIds.find(id => p.cameras.some(camera => camera.id === id));
+      if (cameraId && p.cameras.some(camera => camera.id === targetId)) return { ...p, cameras: reorderById(p.cameras, cameraId, targetId, after) };
       return p;
     });
     setNotice(t('notice.reordered'));
   }
   function beginTimelineDrag(event: ReactDragEvent<HTMLButtonElement>, id: string) { timelineDrag.current = id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData(TRACK_DRAG, id); }
   function overTimelineRow(event: ReactDragEvent<HTMLButtonElement>, id: string) { if (!timelineDrag.current || timelineDrag.current === id) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setTimelineDrop({ id, after: event.clientY >= rect.top + rect.height / 2 }); }
-  function dropTimelineRow(event: ReactDragEvent<HTMLButtonElement>, id: string) { const draggedId = timelineDrag.current || event.dataTransfer.getData(TRACK_DRAG); if (draggedId && draggedId !== id) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); reorderEntity(draggedId, id, event.clientY >= rect.top + rect.height / 2); } timelineDrag.current = ''; setTimelineDrop(null); }
+  function dropTimelineRow(event: ReactDragEvent<HTMLButtonElement>, id: string) { const draggedId = timelineDrag.current || event.dataTransfer.getData(TRACK_DRAG); if (draggedId && draggedId !== id) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); reorderEntity([draggedId], id, event.clientY >= rect.top + rect.height / 2); } timelineDrag.current = ''; setTimelineDrop(null); }
   const timelineOrderClass = (id: string) => timelineDrop?.id === id ? timelineDrop.after ? 'reorder-after' : 'reorder-before' : '';
-  function removeGroup() { if (!group) return; setProject(p => ({ ...p, groups: p.groups.filter(value => value.id !== group.id) })); setSelected(group.objectIds[0] ?? project.objects[0]?.id ?? project.cameras[0]?.id ?? ''); setNotice(t('notice.ungrouped')); }
+  function removeGroup() { if (!group) return; setProject(p => ({ ...p, objects: p.objects.map(object => group.objectIds.includes(object.id) ? reparentObject(object, group, undefined, reparentTimes(p, group)) : object), groups: p.groups.filter(value => value.id !== group.id) })); setSelected(group.objectIds[0] ?? project.objects[0]?.id ?? project.cameras[0]?.id ?? ''); setNotice(t('notice.ungrouped')); }
   function addCamera() {
     const id = crypto.randomUUID(); const start = Math.min(time, Math.max(0, project.duration - 1 / project.fps));
     const source = liveCamera ?? camera ?? project.cameras[0];
@@ -220,30 +277,32 @@ export default function App() {
   function copySelection() {
     if (!selectedIds.length) return;
     if (selectedKey) {
-      const entries = selectedIds.flatMap(id => { const keys = project.objects.find(o => o.id === id)?.keyframes ?? project.cameras.find(c => c.id === id)?.keyframes; const key = keys?.find(k => Math.abs(k.time - selectedKey.time) < .00001); return key ? [{ id, key: structuredClone(key) }] : []; });
+      const entries = selectedIds.flatMap(id => { const keys = project.objects.find(o => o.id === id)?.keyframes ?? project.cameras.find(c => c.id === id)?.keyframes ?? project.groups.find(g => g.id === id)?.keyframes; const key = keys?.find(k => Math.abs(k.time - selectedKey.time) < .00001); return key ? [{ id, key: structuredClone(key) }] : []; });
       if (entries.length) { clipboard.current = { kind: 'keys', entries }; setNotice(t('notice.keysCopied', { count: entries.length })); return; }
     }
-    const objectIds = new Set([...selectedIds, ...project.groups.filter(group => selectedIds.includes(group.id)).flatMap(group => group.objectIds)]);
-    const data: Extract<ClipboardData, { kind: 'entities' }> = { kind: 'entities', objects: project.objects.filter(o => objectIds.has(o.id)).map(o => structuredClone(o)), cameras: project.cameras.filter(c => selectedIds.includes(c.id)).map(c => structuredClone(c)) };
+    const groups = project.groups.filter(group => selectedIds.includes(group.id)), groupIds = new Set(groups.map(group => group.id)), objectIds = new Set([...selectedIds, ...groups.flatMap(group => group.objectIds)]);
+    const data: Extract<ClipboardData, { kind: 'entities' }> = { kind: 'entities', objects: project.objects.filter(o => objectIds.has(o.id)).map(o => { const parent = project.groups.find(group => group.objectIds.includes(o.id)); return structuredClone(parent && !groupIds.has(parent.id) ? reparentObject(o, parent, undefined, reparentTimes(project, parent)) : o); }), cameras: project.cameras.filter(c => selectedIds.includes(c.id)).map(c => structuredClone(c)), groups: groups.map(group => structuredClone(group)) };
     clipboard.current = data; setNotice(t('notice.itemsCopied', { count: data.objects.length + data.cameras.length }));
   }
   function pasteSelection() {
     const data = clipboard.current; if (!data) { setNotice(t('notice.emptyClipboard')); return; } setPlaying(false);
     if (data.kind === 'keys') {
-      setProject(p => ({ ...p, objects: p.objects.map(object => { const entry = data.entries.find(item => item.id === object.id && 'rotation' in item.key); return entry ? { ...object, keyframes: upsert(object.keyframes, { ...(entry.key as ObjectKey), time }) } : object; }), cameras: p.cameras.map(camera => { const entry = data.entries.find(item => item.id === camera.id && 'target' in item.key); return entry ? { ...camera, keyframes: upsertCameraKey(camera.keyframes, { ...(entry.key as CameraKey), time }) } : camera; }) }));
+      setProject(p => ({ ...p, objects: p.objects.map(object => { const entry = data.entries.find(item => item.id === object.id && 'rotation' in item.key && !('target' in item.key)); return entry ? { ...object, keyframes: upsert(object.keyframes, { ...(entry.key as ObjectKey), time }) } : object; }), cameras: p.cameras.map(camera => { const entry = data.entries.find(item => item.id === camera.id && 'target' in item.key); return entry ? { ...camera, keyframes: upsertCameraKey(camera.keyframes, { ...(entry.key as CameraKey), time }) } : camera; }), groups: p.groups.map(group => { const entry = data.entries.find(item => item.id === group.id && 'rotation' in item.key && !('target' in item.key)); return entry ? { ...group, keyframes: upsert(group.keyframes, { ...(entry.key as ObjectKey), time }) } : group; }) }));
       setSelectedKey({ id: selected, time }); setNotice(t('notice.keyPasted', { time: time.toFixed(2) })); return;
     }
-    const objectCopies = data.objects.map(source => { const copy = structuredClone(source); copy.id = crypto.randomUUID(); copy.name += ' copy'; copy.keyframes.forEach(key => key.position[0] += 1); return copy; });
+    const memberIds = new Set(data.groups.flatMap(group => group.objectIds)), idMap = new Map(data.objects.map(object => [object.id, crypto.randomUUID()]));
+    const objectCopies = data.objects.map(source => { const copy = structuredClone(source); copy.id = idMap.get(source.id)!; copy.name += ' copy'; if (!memberIds.has(source.id)) copy.keyframes.forEach(key => key.position[0] += 1); return copy; });
+    const groupCopies = data.groups.map(source => { const copy = structuredClone(source); copy.id = crypto.randomUUID(); copy.name += ' copy'; copy.objectIds = copy.objectIds.map(id => idMap.get(id)!).filter(Boolean); copy.keyframes.forEach(key => key.position[0] += 1); return copy; });
     const cameraCopies = data.cameras.map(source => { const copy = structuredClone(source); copy.id = crypto.randomUUID(); copy.name += ' copy'; copy.keyframes.forEach(key => { key.position[0] += 1; key.target[0] += 1; }); return copy; });
-    setProject(p => ({ ...p, objects: [...p.objects, ...objectCopies], cameras: [...p.cameras, ...cameraCopies] })); setSelectedIds([...objectCopies.map(o => o.id), ...cameraCopies.map(c => c.id)]); setSelectedKey(null); setNotice(t('notice.itemsPasted', { count: objectCopies.length + cameraCopies.length }));
+    setProject(p => ({ ...p, objects: [...p.objects, ...objectCopies], cameras: [...p.cameras, ...cameraCopies], groups: [...p.groups, ...groupCopies] })); setSelectedIds(groupCopies.length ? groupCopies.map(g => g.id) : [...objectCopies.map(o => o.id), ...cameraCopies.map(c => c.id)]); setSelectedKey(null); setNotice(t('notice.itemsPasted', { count: objectCopies.length + cameraCopies.length }));
   }
   function deleteSelection() {
-    if (!selectedIds.length) return; const objectIds = new Set(project.objects.filter(object => selectedIds.includes(object.id)).map(object => object.id)); setPlaying(false); setProject(p => ({ ...p, objects: p.objects.filter(o => !objectIds.has(o.id)), cameras: p.cameras.filter(c => !selectedIds.includes(c.id)), groups: p.groups.filter(group => !selectedIds.includes(group.id)).map(group => ({ ...group, objectIds: group.objectIds.filter(id => !objectIds.has(id)) })) })); setSelectedIds([]); setSelectedKey(null); setNotice(t('notice.itemsDeleted', { count: selectedIds.length }));
+    if (!selectedIds.length) return; const objectIds = new Set(project.objects.filter(object => selectedIds.includes(object.id)).map(object => object.id)); setPlaying(false); setProject(p => { const removedGroups = p.groups.filter(group => selectedIds.includes(group.id)); return { ...p, objects: p.objects.filter(o => !objectIds.has(o.id)).map(object => { const parent = removedGroups.find(group => group.objectIds.includes(object.id)); return parent ? reparentObject(object, parent, undefined, reparentTimes(p, parent)) : object; }), cameras: p.cameras.filter(c => !selectedIds.includes(c.id)), groups: p.groups.filter(group => !selectedIds.includes(group.id)).map(group => ({ ...group, objectIds: group.objectIds.filter(id => !objectIds.has(id)) })) }; }); setSelectedIds([]); setSelectedKey(null); setNotice(t('notice.itemsDeleted', { count: selectedIds.length }));
   }
-  function addKey() { if (camera && cameraPose) updateKey(camera.id, cameraPose); else if (pose) updateKey(selected, pose); setNotice(t('notice.keyAdded', { time: time.toFixed(2) })); }
+  function addKey() { if (camera && cameraPose) updateKey(camera.id, cameraPose); else if (group && groupPose) transformGroup(group.id, groupPose); else if (pose) updateKey(selected, pose); setNotice(t('notice.keyAdded', { time: time.toFixed(2) })); }
   function deleteKey() {
-    const at = selectedKey?.time ?? time, entities = [...project.objects, ...project.cameras], matching = entities.filter(entity => selectedIds.includes(entity.id) && entity.keyframes.some(k => Math.abs(k.time - at) < .00001)), removable = new Set(matching.filter(entity => entity.keyframes.length > 1).map(entity => entity.id)); setPlaying(false);
-    if (removable.size) setProject(p => ({ ...p, objects: p.objects.map(object => removable.has(object.id) ? { ...object, keyframes: object.keyframes.filter(k => Math.abs(k.time - at) > .00001) } : object), cameras: p.cameras.map(camera => removable.has(camera.id) ? { ...camera, keyframes: removeCameraKey(camera.keyframes, at) } : camera) }));
+    const at = selectedKey?.time ?? time, entities = [...project.objects, ...project.cameras, ...project.groups], matching = entities.filter(entity => selectedIds.includes(entity.id) && entity.keyframes.some(k => Math.abs(k.time - at) < .00001)), removable = new Set(matching.filter(entity => entity.keyframes.length > 1).map(entity => entity.id)); setPlaying(false);
+    if (removable.size) setProject(p => ({ ...p, objects: p.objects.map(object => removable.has(object.id) ? { ...object, keyframes: object.keyframes.filter(k => Math.abs(k.time - at) > .00001) } : object), cameras: p.cameras.map(camera => removable.has(camera.id) ? { ...camera, keyframes: removeCameraKey(camera.keyframes, at) } : camera), groups: p.groups.map(group => removable.has(group.id) ? { ...group, keyframes: group.keyframes.filter(k => Math.abs(k.time - at) > .00001) } : group) }));
     setSelectedKey(null); setNotice(removable.size ? t('notice.keysDeleted', { count: removable.size }) : matching.length ? t('notice.lastKey') : t('notice.noKey'));
   }
   async function load(file?: File) {
@@ -258,8 +317,16 @@ export default function App() {
     catch (e) { setError(e instanceof Error ? e.message : t('error.videoExport')); }
     finally { setProgress(null); abort.current = null; }
   }
-  const selectedKeys = camera?.keyframes ?? object?.keyframes ?? [];
+  const selectedKeys = camera?.keyframes ?? group?.keyframes ?? object?.keyframes ?? [];
   const atKey = selectedKeys.some(k => Math.abs(k.time - time) < 0.00001);
+  const groupedIds = new Set(project.groups.flatMap(value => value.objectIds));
+  type TimelineRow = { id: string; name: string; color: string; keys: (ObjectKey | CameraKey)[]; range?: VisibilityRange; camera: boolean; group: boolean; nested: boolean };
+  const objectTrack = (value: SceneObject, nested = false): TimelineRow => ({ id: value.id, name: value.name, color: value.color, keys: value.keyframes, range: objectRange(value, project.duration), camera: false, group: false, nested });
+  const timelineRows: TimelineRow[] = [
+    ...project.objects.filter(value => !groupedIds.has(value.id)).map(value => objectTrack(value)),
+    ...project.groups.flatMap(value => [{ id: value.id, name: value.name, color: '#d7b787', keys: value.keyframes, camera: false, group: true, nested: false }, ...(collapsedTimelineGroups.has(value.id) ? [] : value.objectIds.map(id => project.objects.find(object => object.id === id)).filter((object): object is SceneObject => !!object).map(object => objectTrack(object, true)))]),
+    ...project.cameras.map(value => ({ id: value.id, name: value.name, color: value.color, keys: value.keyframes, range: value.range, camera: true, group: false, nested: false })),
+  ];
   return <div className="app" onFocusCapture={e => { if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) beginGroup(); }} onBlur={e => { if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) endGroup(); }}>
     <header className="topbar">
       <div className="brand"><span className="brand-mark"><Film size={20} /></span>FRAME<span className="brand-sub">PREVIS STUDIO</span></div>
@@ -270,7 +337,7 @@ export default function App() {
     <div className="projectbar"><div className="project-title"><span className="project-index">01</span><input aria-label={t('project.name')} value={project.name} maxLength={100} onChange={e => setProject(p => ({ ...p, name: e.target.value }))} /><span className="saved-state">{saved ? <Check size={12} /> : <Circle size={9} />}{saved ? t('project.saved') : t('project.saving')}</span></div><div className="output-settings"><label><span>{t('project.ratio')}</span><select aria-label={t('project.aspect')} value={project.output.aspectRatio} onChange={e => changeOutput({ aspectRatio: e.target.value as AspectRatio })}>{aspectRatios.map(value => <option key={value} value={value}>{t(aspectLabels[value])}</option>)}</select></label><label><span>{t('project.size')}</span><select aria-label={t('project.megapixels')} value={project.output.megapixels} onChange={e => changeOutput({ megapixels: e.target.value as Megapixels })}>{megapixels.map(value => <option key={value} value={value}>{value} MP</option>)}</select></label><div className="format-tag">{project.resolution.width} × {project.resolution.height}<span> / </span><select aria-label={t('project.frameRate')} value={project.fps} onChange={e => setProject(p => ({ ...p, fps: Number(e.target.value) }))}>{fpsOptions.map(value => <option key={value} value={value}>{value}</option>)}</select> FPS<span> / </span>{project.duration}s</div></div></div>
     <main className="workspace">
       <aside className={`sidebar ${assetsCollapsed ? 'assets-collapsed' : ''}`}>
-        <SceneTree project={project} selected={selected} selectedIds={selectedIds} onSelect={selectEntity} onAddCamera={addCamera} onAddGroup={addGroup} onMoveToGroup={moveToGroup} onMoveToEnd={moveToEnd} onReorder={reorderEntity} />
+        <SceneTree project={project} selected={selected} selectedIds={selectedIds} onSelect={selectEntity} onAddCamera={addCamera} onAddGroup={addGroupFromSelection} onMoveToGroup={moveToGroup} onMoveToEnd={moveToEnd} onReorder={reorderEntity} />
         <section className={`assets-section ${assetsCollapsed ? 'collapsed' : ''}`}><div className="section-title"><span>{t('section.assets')}</span><button className={`assets-toggle ${assetsCollapsed ? '' : 'open'}`} aria-label={assetsCollapsed ? t('assets.open') : t('assets.close')} aria-expanded={!assetsCollapsed} onClick={() => setAssetsCollapsed(value => !value)}><Plus size={14} /></button></div>{!assetsCollapsed && <><div className="asset-grid">{primitives.map((asset, i) => { const Icon = assetIcons[i]; return <button className="asset-card" key={asset} onClick={() => addObject(asset, assetNames[i])}><Icon size={20} strokeWidth={1.2} /><span>{assetNames[i]}</span><Plus className="asset-plus" size={10} /></button>; })}</div><div className="external-title">{t('assets.external')} <span>{models.length}</span></div>{models.length ? <div className="external-assets">{models.map(m => <button key={m.asset} onClick={() => addObject(m.asset, m.name)} title={m.asset}><Box size={15} /><span>{m.name}</span><Plus size={13} /></button>)}</div> : <div className="asset-empty"><FolderOpen size={20} /><p>{t('assets.addGlb')}</p><small>{t('assets.folderHint')}<br />{t('assets.autoHint')}</small></div>}</>}</section>
         <div className="sidebar-bottom"><span className="status-dot" />{t(ready ? 'status.webglReady' : 'status.webglInitializing')}<span>v1.0</span></div>
       </aside>
@@ -284,7 +351,7 @@ export default function App() {
         {group && <><div className="object-type">{t('inspector.groupType', { count: group.objectIds.length })}</div><p className="microcopy">{t('inspector.groupHelp')}</p></>}
         {object && <><div className="object-type">{object.asset.startsWith('primitive:') ? t('inspector.primitiveObject') : object.asset}</div><div className="color-line"><span>{t('inspector.color')}</span><div className="swatches">{palette.map(c => <button key={c} aria-label={t('inspector.colorAria', { color: c })} style={{ background: c }} className={object.color === c ? 'chosen' : ''} onClick={() => setProject(p => ({ ...p, objects: p.objects.map(o => o.id === selected ? { ...o, color: c } : o) }))} />)}</div><input type="color" aria-label={t('inspector.customColor')} value={object.color} onChange={e => setProject(p => ({ ...p, objects: p.objects.map(o => o.id === selected ? { ...o, color: e.target.value } : o) }))} /></div></>}
         {object && <><div className="inspector-divider" /><div className="subsection-title">{t('section.size')}<span>{t('inspector.scaleSummary')}</span></div><VectorFields label={t('inspector.scale')} value={object.scale} live min={0.001} max={1000} step={0.1} onChange={scale => setProject(p => ({ ...p, objects: p.objects.map(o => o.id === object.id ? { ...o, scale } : o) }))} /><NumberField label={t('inspector.uniformScale')} value={object.uniformScale} live min={0.001} max={1000} step={0.1} onChange={uniformScale => setProject(p => ({ ...p, objects: p.objects.map(o => o.id === object.id ? { ...o, uniformScale } : o) }))} /><p className="microcopy">{t('inspector.scaleHelp')}</p></>}
-        {(pose || cameraPose) && <><div className="inspector-divider" /><div className="subsection-title">{t('section.transform')} <span>{time.toFixed(2)}s</span></div><VectorFields label={t('inspector.position')} value={cameraPose ? cameraPose.position : pose!.position} onChange={position => cameraPose ? changeCamera({ position }) : changeObject({ position })} /><VectorFields label={t(cameraPose ? 'inspector.target' : 'inspector.rotation')} value={cameraPose ? cameraPose.target : pose!.rotation} onChange={value => cameraPose ? changeCamera({ target: value }) : changeObject({ rotation: value })} />{cameraPose && <NumberField label={t('inspector.fovDegrees')} min={5} max={150} step={1} value={cameraPose.fov} onChange={fov => changeCamera({ fov })} />}<div className="inspector-divider" /><div className="subsection-title">{t('section.animation')}<span className="auto-key">{t('inspector.autoKey')}</span></div><label className="select-field"><span>{t('inspector.interpolation')}</span><select aria-label={t('inspector.interpolation')} value={(cameraPose ?? pose)!.easing ?? 'linear'} onChange={e => cameraPose ? changeCamera({ easing: e.target.value as Ease }) : changeObject({ easing: e.target.value as Ease })}><option value="linear">{t('inspector.easeLinear')}</option><option value="ease-in">{t('inspector.easeIn')}</option><option value="ease-out">{t('inspector.easeOut')}</option><option value="ease-in-out">{t('inspector.easeInOut')}</option></select></label><div className="key-actions"><button className="key-button" onClick={addKey}><Diamond size={13} fill={atKey ? 'currentColor' : 'none'} />{t(atKey ? 'inspector.updateKey' : 'inspector.addKey')}</button><button aria-label={t('inspector.deleteCurrentKey')} title={t('inspector.deleteCurrentKey')} disabled={!atKey || selectedKeys.length <= 1} onClick={deleteKey}><Trash2 size={14} /></button></div><p className="microcopy">{t('inspector.autoKeyHelp')}</p></>}
+        {(pose || groupPose || cameraPose) && <><div className="inspector-divider" /><div className="subsection-title">{t('section.transform')} <span>{time.toFixed(2)}s</span></div><VectorFields label={t('inspector.position')} value={(cameraPose ?? groupPose ?? pose)!.position} onChange={position => cameraPose ? changeCamera({ position }) : groupPose ? changeGroup({ position }) : changeObject({ position })} /><VectorFields label={t(cameraPose ? 'inspector.target' : 'inspector.rotation')} value={cameraPose ? cameraPose.target : (groupPose ?? pose)!.rotation} onChange={value => cameraPose ? changeCamera({ target: value }) : groupPose ? changeGroup({ rotation: value }) : changeObject({ rotation: value })} />{cameraPose && <NumberField label={t('inspector.fovDegrees')} min={5} max={150} step={1} value={cameraPose.fov} onChange={fov => changeCamera({ fov })} />}<div className="inspector-divider" /><div className="subsection-title">{t('section.animation')}<span className="auto-key">{t('inspector.autoKey')}</span></div><label className="select-field"><span>{t('inspector.interpolation')}</span><select aria-label={t('inspector.interpolation')} value={(cameraPose ?? groupPose ?? pose)!.easing ?? 'linear'} onChange={e => cameraPose ? changeCamera({ easing: e.target.value as Ease }) : groupPose ? changeGroup({ easing: e.target.value as Ease }) : changeObject({ easing: e.target.value as Ease })}><option value="linear">{t('inspector.easeLinear')}</option><option value="ease-in">{t('inspector.easeIn')}</option><option value="ease-out">{t('inspector.easeOut')}</option><option value="ease-in-out">{t('inspector.easeInOut')}</option></select></label><div className="key-actions"><button className="key-button" onClick={addKey}><Diamond size={13} fill={atKey ? 'currentColor' : 'none'} />{t(atKey ? 'inspector.updateKey' : 'inspector.addKey')}</button><button aria-label={t('inspector.deleteCurrentKey')} title={t('inspector.deleteCurrentKey')} disabled={!atKey || selectedKeys.length <= 1} onClick={deleteKey}><Trash2 size={14} /></button></div><p className="microcopy">{t('inspector.autoKeyHelp')}</p></>}
         {cameraPose && <><div className="inspector-divider" /><div className="subsection-title">{t('section.cameraLens')}<span>{cameraPose.fov.toFixed(0)}°</span></div><label className="fov-slider"><span>{t('inspector.fov')}</span><input aria-label={t('inspector.fovSlider')} type="range" min="5" max="120" step="1" value={cameraPose.fov} onChange={e => changeCamera({ fov: Number(e.target.value) })} /></label><div className="fov-presets"><button onClick={() => changeCamera({ fov: 75 })}>{t('inspector.wide')}</button><button onClick={() => changeCamera({ fov: 50 })}>{t('inspector.standard')}</button><button onClick={() => changeCamera({ fov: 25 })}>{t('inspector.telephoto')}</button></div><p className="microcopy">{t('inspector.fovHelp')}</p></>}
         {object && <div className="object-actions"><button onClick={duplicate}><Copy size={14} />{t('inspector.duplicate')}</button><button onClick={remove}><Trash2 size={14} />{t('common.delete')}</button></div>}
         {camera && <div className="object-actions"><button onClick={addCamera}><Plus size={14} />{t('inspector.cutNow')}</button><button onClick={removeCamera}><Trash2 size={14} />{t('inspector.deleteCamera')}</button></div>}
@@ -292,8 +359,8 @@ export default function App() {
         </div>
       </aside>
     </main>
-    <section className="timeline"><div className="timeline-toolbar"><div className="timeline-title"><span>{t('section.timeline')}</span><small>{t('timeline.tracks', { count: project.objects.length + project.cameras.length })}</small></div><div className="transport"><button aria-label={t('timeline.first')} onClick={() => seek(0)}><SkipBack size={15} /></button><button className="play-button" aria-label={t(playing ? 'timeline.pause' : 'timeline.play')} onClick={() => setPlaying(p => !p)}>{playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</button><button aria-label={t('timeline.stop')} onClick={() => seek(0)}><Square size={12} /></button><button aria-label={t('timeline.loop')} aria-pressed={loop} className={loop ? 'loop-on' : ''} onClick={() => setLoop(p => !p)}><Repeat2 size={17} /></button><span className="timecode">{String(Math.floor(time / 60)).padStart(2, '0')}:{String(Math.floor(time % 60)).padStart(2, '0')}<b>:{String(Math.floor((time % 1) * project.fps)).padStart(2, '0')}</b></span></div><div className="duration-setting"><span>{t('timeline.duration')}</span><NumberField label={t('timeline.durationSeconds')} min={0.1} max={600} step={1} value={project.duration} onChange={duration => { setPlaying(false); setProject(p => ({ ...p, duration })); setTime(t => Math.min(t, duration)); }} /><span>{t('common.seconds')}</span></div></div>
-      <div className="timeline-body"><div className="track-labels"><div className="track-label-top">{t('timeline.trackHeader')}</div>{project.objects.map(o => <button draggable key={o.id} className={`${selectedIds.includes(o.id) ? 'selected' : ''} ${selected === o.id ? 'primary' : ''} ${timelineOrderClass(o.id)}`} onDragStart={event => beginTimelineDrag(event, o.id)} onDragOver={event => overTimelineRow(event, o.id)} onDrop={event => dropTimelineRow(event, o.id)} onDragEnd={() => { timelineDrag.current = ''; setTimelineDrop(null); }} onClick={e => selectEntity(o.id, e.shiftKey)}><span className="object-dot" style={{ background: o.color }} /><span>{o.name}</span></button>)}{project.cameras.map(c => <button draggable key={c.id} className={`${selectedIds.includes(c.id) ? 'selected' : ''} ${selected === c.id ? 'primary' : ''} ${timelineOrderClass(c.id)}`} onDragStart={event => beginTimelineDrag(event, c.id)} onDragOver={event => overTimelineRow(event, c.id)} onDrop={event => dropTimelineRow(event, c.id)} onDragEnd={() => { timelineDrag.current = ''; setTimelineDrop(null); }} onClick={e => selectEntity(c.id, e.shiftKey)}><Camera size={13} style={{ color: c.color }} /><span>{c.name}</span></button>)}</div><div className="tracks" onPointerDown={e => { if ((e.target as HTMLElement).closest('.keyframe,.visibility-handle')) return; e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); seek((e.clientX - r.left) / r.width * project.duration); }} onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) { const r = e.currentTarget.getBoundingClientRect(); seek((e.clientX - r.left) / r.width * project.duration); } }} onPointerUp={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); }}><div className="ruler">{Array.from({ length: 11 }, (_, i) => <span key={i} style={{ left: `${i * 10}%` }}>{(project.duration * i / 10).toFixed(project.duration < 10 ? 1 : 0)}s</span>)}</div>{[...project.objects.map(o => ({ id: o.id, name: o.name, color: o.color, keys: o.keyframes, range: objectRange(o, project.duration), camera: false })), ...project.cameras.map(c => ({ id: c.id, name: c.name, color: c.color, keys: c.keyframes, range: c.range, camera: true }))].map(track => <div className={`track ${selectedIds.includes(track.id) ? 'selected' : ''} ${selected === track.id ? 'primary' : ''} ${track.camera && liveCamera?.id === track.id ? 'live-camera-track' : ''}`} key={track.id}><VisibilityClip onBegin={beginGroup} onEnd={endGroup} range={track.range} duration={project.duration} fps={project.fps} color={track.color} name={track.name} onChange={range => changeRange(track.id, range)} /><div className="track-line" style={{ background: track.color, left: `${clamp(track.keys[0].time / project.duration * 100, 0, 100)}%`, width: `${clamp((Math.min(track.keys.at(-1)!.time, project.duration) - track.keys[0].time) / project.duration * 100, 0, 100)}%` }} />{visibleKeyMarkers(track.keys, project.duration, time, selectedIds.includes(track.id)).map(k => <button key={k.time} className={`keyframe ${(k.time < track.range.start || k.time >= track.range.end) ? 'outside-range' : ''} ${selectedKey?.id === track.id && Math.abs(selectedKey.time - k.time) < 0.00001 ? 'current' : ''}`} style={{ left: `${k.time / project.duration * 100}%`, color: track.color }} aria-label={t('timeline.keyAria', { name: track.name, time: k.time.toFixed(2) })} title={t('timeline.keyTitle', { time: k.time.toFixed(2) })} onPointerDown={e => e.stopPropagation()} onClick={e => { selectEntity(track.id, e.shiftKey); setSelectedKey({ id: track.id, time: k.time }); setPlaying(false); setTime(k.time); }}><Diamond size={11} fill="currentColor" /></button>)}</div>)}<div className="playhead" style={{ left: `${time / project.duration * 100}%` }}><span /></div></div></div>
+    <section className="timeline"><div className="timeline-toolbar"><div className="timeline-title"><span>{t('section.timeline')}</span><small>{t('timeline.tracks', { count: project.objects.length + project.cameras.length + project.groups.length })}</small></div><div className="transport"><button aria-label={t('timeline.first')} onClick={() => seek(0)}><SkipBack size={15} /></button><button className="play-button" aria-label={t(playing ? 'timeline.pause' : 'timeline.play')} onClick={() => setPlaying(p => !p)}>{playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</button><button aria-label={t('timeline.stop')} onClick={() => seek(0)}><Square size={12} /></button><button aria-label={t('timeline.loop')} aria-pressed={loop} className={loop ? 'loop-on' : ''} onClick={() => setLoop(p => !p)}><Repeat2 size={17} /></button><span className="timecode">{String(Math.floor(time / 60)).padStart(2, '0')}:{String(Math.floor(time % 60)).padStart(2, '0')}<b>:{String(Math.floor((time % 1) * project.fps)).padStart(2, '0')}</b></span></div><div className="duration-setting"><span>{t('timeline.duration')}</span><NumberField label={t('timeline.durationSeconds')} min={0.1} max={600} step={1} value={project.duration} onChange={duration => { setPlaying(false); setProject(p => ({ ...p, duration })); setTime(t => Math.min(t, duration)); }} /><span>{t('common.seconds')}</span></div></div>
+      <div className="timeline-body"><div className="track-labels"><div className="track-label-top">{t('timeline.trackHeader')}</div>{timelineRows.map(row => <button draggable={!row.group} key={row.id} className={`${selectedIds.includes(row.id) ? 'selected' : ''} ${selected === row.id ? 'primary' : ''} ${row.group ? 'group-track-label' : ''} ${row.nested ? 'nested' : ''} ${timelineOrderClass(row.id)}`} onDragStart={event => { if (!row.group) beginTimelineDrag(event, row.id); }} onDragOver={event => { if (!row.group) overTimelineRow(event, row.id); }} onDrop={event => { if (!row.group) dropTimelineRow(event, row.id); }} onDragEnd={() => { timelineDrag.current = ''; setTimelineDrop(null); }} onClick={e => selectEntity(row.id, e.shiftKey)}>{row.group ? <><span className="timeline-disclosure" role="button" aria-label={collapsedTimelineGroups.has(row.id) ? 'Expand group track' : 'Collapse group track'} onClick={event => { event.stopPropagation(); setCollapsedTimelineGroups(current => { const next = new Set(current); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next; }); }}>{collapsedTimelineGroups.has(row.id) ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span><Folder size={13} /></> : row.camera ? <Camera size={13} style={{ color: row.color }} /> : <span className="object-dot" style={{ background: row.color }} />}<span>{row.name}</span></button>)}</div><div className="tracks" onPointerDown={e => { if ((e.target as HTMLElement).closest('.keyframe,.visibility-handle')) return; e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); seek((e.clientX - r.left) / r.width * project.duration); }} onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) { const r = e.currentTarget.getBoundingClientRect(); seek((e.clientX - r.left) / r.width * project.duration); } }} onPointerUp={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); }}><div className="ruler">{Array.from({ length: 11 }, (_, i) => <span key={i} style={{ left: `${i * 10}%` }}>{(project.duration * i / 10).toFixed(project.duration < 10 ? 1 : 0)}s</span>)}</div>{timelineRows.map(track => <div className={`track ${selectedIds.includes(track.id) ? 'selected' : ''} ${selected === track.id ? 'primary' : ''} ${track.camera && liveCamera?.id === track.id ? 'live-camera-track' : ''} ${track.group ? 'group-track' : ''} ${track.nested ? 'nested' : ''}`} key={track.id}>{track.range && <VisibilityClip onBegin={beginGroup} onEnd={endGroup} range={track.range} duration={project.duration} fps={project.fps} color={track.color} name={track.name} onChange={range => changeRange(track.id, range)} />}<div className="track-line" style={{ background: track.color, left: `${clamp(track.keys[0].time / project.duration * 100, 0, 100)}%`, width: `${clamp((Math.min(track.keys.at(-1)!.time, project.duration) - track.keys[0].time) / project.duration * 100, 0, 100)}%` }} />{visibleKeyMarkers(track.keys, project.duration, time, selectedIds.includes(track.id)).map(k => <button key={k.time} className={`keyframe ${track.range && (k.time < track.range.start || k.time >= track.range.end) ? 'outside-range' : ''} ${selectedKey?.id === track.id && Math.abs(selectedKey.time - k.time) < 0.00001 ? 'current' : ''}`} style={{ left: `${k.time / project.duration * 100}%`, color: track.color }} aria-label={t('timeline.keyAria', { name: track.name, time: k.time.toFixed(2) })} title={t('timeline.keyTitle', { time: k.time.toFixed(2) })} onPointerDown={e => e.stopPropagation()} onClick={e => { selectEntity(track.id, e.shiftKey); setSelectedKey({ id: track.id, time: k.time }); setPlaying(false); setTime(k.time); }}><Diamond size={11} fill="currentColor" /></button>)}</div>)}<div className="playhead" style={{ left: `${time / project.duration * 100}%` }}><span /></div></div></div>
       <div className="timeline-footer"><span><Diamond size={10} />{t('timeline.footerLeft')}</span><span>{t('timeline.footerRight')}</span></div>
     </section>
     {notice && <div className="toast" role="status"><Check size={15} />{notice}</div>}

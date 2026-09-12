@@ -54,13 +54,13 @@ JSON rotations use degrees. The coordinate system is Y-up, and the mannequin fac
 | Undo | Ctrl+Z |
 | Redo | Ctrl+Y or Ctrl+Shift+Z |
 
-Undo and redo retain the latest 100 operations. Text inputs keep their normal editing shortcuts. Every object and camera retains at least one keyframe as its base pose.
+Undo and redo retain the latest 100 operations. Text inputs keep their normal editing shortcuts. Every object, camera, and group retains at least one keyframe as its base pose.
 
 The first selected item is the primary selection. Moving or rotating it applies the same delta to the other selected items, preserving their existing offsets and angles.
 
 ## Groups and ordering
 
-Use the folder button beside the Scene heading to create an empty group. Drag objects into or out of folders freely. You can also Shift+click two or more objects and right-click the editor view to create a group around their shared center. Moving or rotating the group transforms every member around that center. Deleting or ungrouping a folder leaves its objects in the scene.
+Use the folder button beside the Scene heading to group two or more selected objects around their shared center. With fewer than two objects selected, it creates an empty group. When several objects are selected, dragging any selected member moves the entire selection into or out of folders. You can also right-click the editor view to name a new group. A group has its own parent transform track; member animation remains in group-local coordinates. Moving or rotating the group adds a parent key and keeps the assembled shape rigid between keys. Expand the group in Timeline to edit member tracks. Deleting or ungrouping a folder bakes its animated world motion into the members and leaves them in the scene.
 
 Drag rows in Scene or Timeline to reorder them. Dropping above or below a row controls insertion order, and both panels stay synchronized. Drop an object on a folder row to add it to that folder. Use the button beside the Assets heading to collapse the asset browser and give Scene more room.
 

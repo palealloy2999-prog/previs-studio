@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { activeCamera, isObjectVisible, sampleCamera, sampleObject, type CameraKey, type ObjectKey, type Project, type Vec3 } from './model';
+import { activeCamera, composeObjectPose, isObjectVisible, relativeObjectPose, sampleCamera, sampleGroup, sampleObject, type CameraKey, type ObjectKey, type Project, type Vec3 } from './model';
 import { t } from './i18n';
 
-type Callbacks = { select: (id: string, additive: boolean) => void; transform: (id: string, key: ObjectKey | CameraKey) => void; transformGroup: (id: string, move: Vec3, turn: Vec3) => void; toggleMode: () => void; error: (message: string) => void; beginEdit?: () => void; endEdit?: () => void };
+type Callbacks = { select: (id: string, additive: boolean) => void; transform: (id: string, key: ObjectKey | CameraKey) => void; transformGroup: (id: string, key: ObjectKey) => void; toggleMode: () => void; error: (message: string) => void; beginEdit?: () => void; endEdit?: () => void };
 const deg = THREE.MathUtils.radToDeg;
 export class SceneEngine {
   scene = new THREE.Scene();
@@ -33,7 +33,6 @@ export class SceneEngine {
   private resize: ResizeObserver;
   private selection = new THREE.BoxHelper(new THREE.Object3D(), 0xe7b57b);
   private secondarySelections = new Map<string, THREE.BoxHelper>();
-  private groupDragLast: { position: THREE.Vector3; rotation: THREE.Euler } | null = null;
   constructor(private host: HTMLElement, private previewHost: HTMLElement, private assets: Map<string, string>, private callbacks: Callbacks) {
     this.scene.background = new THREE.Color('#20272b');
     this.scene.fog = new THREE.Fog('#20272b', 35, 95);
@@ -65,21 +64,16 @@ export class SceneEngine {
     this.transform.setSize(0.85); this.helpers.add(this.transform.getHelper());
     this.transform.addEventListener('dragging-changed', event => {
       this.orbit.enabled = !event.value;
-      if (event.value) {
-        if (this.transform.object === this.groupRig) this.groupDragLast = { position: this.groupRig.position.clone(), rotation: this.groupRig.rotation.clone() };
-        if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); this.callbacks.beginEdit?.();
-      } else { this.groupDragLast = null; this.callbacks.endEdit?.(); }
+      if (event.value) { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); this.callbacks.beginEdit?.(); }
+      else this.callbacks.endEdit?.();
     });
     this.transform.addEventListener('objectChange', () => {
       const node = this.transform.object; if (!node || !this.project) return;
       const position = node.position.toArray() as Vec3;
       const selectedGroup = this.project.groups.find(group => group.id === this.selected);
       if (selectedGroup && node === this.groupRig) {
-        const previous = this.groupDragLast; if (!previous) return;
-        const move = node.position.clone().sub(previous.position).toArray() as Vec3;
-        const turn: Vec3 = [deg(node.rotation.x - previous.rotation.x), deg(node.rotation.y - previous.rotation.y), deg(node.rotation.z - previous.rotation.z)];
-        this.groupDragLast = { position: node.position.clone(), rotation: node.rotation.clone() };
-        this.callbacks.transformGroup(selectedGroup.id, move, turn); return;
+        const current = sampleGroup(selectedGroup.keyframes, this.time);
+        this.callbacks.transformGroup(selectedGroup.id, { ...current, time: this.time, position, rotation: [deg(node.rotation.x), deg(node.rotation.y), deg(node.rotation.z)] }); return;
       }
       const selectedCamera = this.project.cameras.find(camera => camera.id === this.selected);
       if (selectedCamera) {
@@ -88,7 +82,9 @@ export class SceneEngine {
         this.callbacks.transform(selectedCamera.id, { ...current, position, target: direction.add(node.position).toArray() as Vec3 });
       } else {
         const object = this.project.objects.find(o => o.id === this.selected);
-        this.callbacks.transform(this.selected, { time: this.time, position, rotation: [deg(node.rotation.x), deg(node.rotation.y), deg(node.rotation.z)], easing: object ? sampleObject(object.keyframes, this.time).easing : 'linear' });
+        const world = { time: this.time, position, rotation: [deg(node.rotation.x), deg(node.rotation.y), deg(node.rotation.z)] as Vec3, easing: object ? sampleObject(object.keyframes, this.time).easing : 'linear' };
+        const parent = this.project.groups.find(group => group.objectIds.includes(this.selected));
+        this.callbacks.transform(this.selected, parent ? relativeObjectPose(world, sampleGroup(parent.keyframes, this.time)) : world);
       }
     });
     this.renderer.domElement.addEventListener('pointerdown', this.pointerDown);
@@ -166,7 +162,8 @@ export class SceneEngine {
       const node = this.objects.get(object.id); if (!node) continue;
       node.visible = isObjectVisible(object, time, this.project.duration);
       if (this.transform.dragging && this.transform.object === node && !this.exporting) continue;
-      const key = sampleObject(object.keyframes, time); node.position.fromArray(key.position); node.rotation.set(...key.rotation.map(THREE.MathUtils.degToRad) as Vec3); node.scale.fromArray(object.scale.map(value => value * object.uniformScale) as Vec3);
+      const local = sampleObject(object.keyframes, time), parent = this.project.groups.find(group => group.objectIds.includes(object.id));
+      const key = composeObjectPose(local, parent ? sampleGroup(parent.keyframes, time) : undefined); node.position.fromArray(key.position); node.rotation.set(...key.rotation.map(THREE.MathUtils.degToRad) as Vec3); node.scale.fromArray(object.scale.map(value => value * object.uniformScale) as Vec3);
     }
     const liveCamera = activeCamera(this.project, time); this.hasActiveCamera = !!liveCamera;
     if (liveCamera) {
@@ -186,8 +183,8 @@ export class SceneEngine {
     const members = selectedGroup?.objectIds.map(id => this.objects.get(id)).filter((node): node is THREE.Group => !!node?.visible) ?? [];
     this.groupRig.visible = members.length > 0;
     if (members.length && (!this.transform.dragging || this.transform.object !== this.groupRig)) {
-      const center = members.reduce((sum, node) => sum.add(node.position), new THREE.Vector3()).multiplyScalar(1 / members.length);
-      this.groupRig.position.copy(center); this.groupRig.rotation.set(0, 0, 0);
+      const key = sampleGroup(selectedGroup!.keyframes, time);
+      this.groupRig.position.fromArray(key.position); this.groupRig.rotation.set(...key.rotation.map(THREE.MathUtils.degToRad) as Vec3);
     }
     const selected = selectedGroup ? this.groupRig : selectedCamera ? this.cameraRigs.get(selectedCamera.id)?.rig : this.objects.get(this.selected);
     this.selection.visible = !!selected?.visible;

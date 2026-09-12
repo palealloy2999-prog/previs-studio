@@ -1,13 +1,14 @@
 import { t } from './i18n';
 
 export type Vec3 = [number, number, number];
+type Quat = [number, number, number, number];
 export type Ease = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
 export type ObjectKey = { time: number; position: Vec3; rotation: Vec3; easing?: Ease };
 export type CameraKey = { time: number; position: Vec3; target: Vec3; fov: number; easing?: Ease };
 export type VisibilityRange = { start: number; end: number };
 export type SceneObject = { id: string; name: string; asset: string; color: string; keyframes: ObjectKey[]; scale: Vec3; uniformScale: number; visibility?: VisibilityRange };
 export type SceneCamera = { id: string; name: string; color: string; keyframes: CameraKey[]; range: VisibilityRange };
-export type SceneGroup = { id: string; name: string; objectIds: string[] };
+export type SceneGroup = { id: string; name: string; objectIds: string[]; keyframes: ObjectKey[] };
 export const objectRange = (object: SceneObject, duration: number): VisibilityRange => object.visibility ?? { start: 0, end: duration };
 export function isObjectVisible(object: SceneObject, time: number, duration: number): boolean {
   const { start, end } = objectRange(object, duration);
@@ -24,13 +25,34 @@ export const palette = ['#eaa36b', '#7db9ce', '#a6c88a', '#d99cba', '#d8cb83', '
 export const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 export const mix3 = (a: Vec3, b: Vec3, t: number): Vec3 => a.map((v, i) => lerp(v, b[i], t)) as Vec3;
-export function transformAroundCenter(poses: ObjectKey[], move: Vec3, turn: Vec3): ObjectKey[] {
-  if (!poses.length) return [];
-  const add = (a: Vec3, b: Vec3): Vec3 => a.map((value, i) => value + b[i]) as Vec3;
-  const center = poses.reduce<Vec3>((sum, pose) => add(sum, pose.position), [0, 0, 0]).map(value => value / poses.length) as Vec3;
-  const [rx, ry, rz] = turn.map(value => value * Math.PI / 180), cx = Math.cos(rx), sx = Math.sin(rx), cy = Math.cos(ry), sy = Math.sin(ry), cz = Math.cos(rz), sz = Math.sin(rz);
-  const rotate = ([x, y, z]: Vec3): Vec3 => { const x1 = x, y1 = y * cx - z * sx, z1 = y * sx + z * cx, x2 = x1 * cy + z1 * sy, y2 = y1, z2 = -x1 * sy + z1 * cy; return [x2 * cz - y2 * sz, x2 * sz + y2 * cz, z2]; };
-  return poses.map(pose => ({ ...pose, position: add(add(center, rotate(pose.position.map((value, i) => value - center[i]) as Vec3)), move), rotation: add(pose.rotation, turn) }));
+const add3 = (a: Vec3, b: Vec3): Vec3 => a.map((value, i) => value + b[i]) as Vec3;
+const sub3 = (a: Vec3, b: Vec3): Vec3 => a.map((value, i) => value - b[i]) as Vec3;
+const multiplyQuaternion = (a: Quat, b: Quat): Quat => [
+  a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+  a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+  a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+  a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+];
+const invertQuaternion = ([x, y, z, w]: Quat): Quat => [-x, -y, -z, w];
+const eulerToQuaternion = (rotation: Vec3): Quat => {
+  const [x, y, z] = rotation.map(value => value * Math.PI / 360), cx = Math.cos(x), sx = Math.sin(x), cy = Math.cos(y), sy = Math.sin(y), cz = Math.cos(z), sz = Math.sin(z);
+  return [sx * cy * cz + cx * sy * sz, cx * sy * cz - sx * cy * sz, cx * cy * sz + sx * sy * cz, cx * cy * cz - sx * sy * sz];
+};
+const quaternionToEuler = ([x, y, z, w]: Quat): Vec3 => {
+  const m11 = 1 - 2 * (y * y + z * z), m12 = 2 * (x * y - z * w), m13 = 2 * (x * z + y * w), m22 = 1 - 2 * (x * x + z * z), m23 = 2 * (y * z - x * w), m32 = 2 * (y * z + x * w), m33 = 1 - 2 * (x * x + y * y);
+  const ry = Math.asin(clamp(m13, -1, 1)), rx = Math.abs(m13) < 0.9999999 ? Math.atan2(-m23, m33) : Math.atan2(m32, m22), rz = Math.abs(m13) < 0.9999999 ? Math.atan2(-m12, m11) : 0;
+  return [rx, ry, rz].map(value => value * 180 / Math.PI) as Vec3;
+};
+const rotateByQuaternion = ([x, y, z]: Vec3, [qx, qy, qz, qw]: Quat): Vec3 => {
+  const tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
+  return [x + qw * tx + qy * tz - qz * ty, y + qw * ty + qz * tx - qx * tz, z + qw * tz + qx * ty - qy * tx];
+};
+function slerpQuaternion(a: Quat, b: Quat, t: number): Quat {
+  let target = b, dot = a.reduce((sum, value, index) => sum + value * b[index], 0);
+  if (dot < 0) { target = b.map(value => -value) as Quat; dot = -dot; }
+  if (dot > 0.9995) { const mixed = a.map((value, index) => value + t * (target[index] - value)) as Quat, length = Math.hypot(...mixed); return mixed.map(value => value / length) as Quat; }
+  const theta = Math.acos(clamp(dot, -1, 1)), sinTheta = Math.sin(theta), wa = Math.sin((1 - t) * theta) / sinTheta, wb = Math.sin(t * theta) / sinTheta;
+  return a.map((value, index) => value * wa + target[index] * wb) as Quat;
 }
 function ratioParts(value: string): [number, number] { const match = /^(\d+):(\d+)/.exec(value); return match ? [Number(match[1]), Number(match[2])] : [1, 1]; }
 function roundHalfEven(value: number): number { const lower = Math.floor(value), fraction = value - lower; if (fraction < .5) return lower; if (fraction > .5) return lower + 1; return lower % 2 === 0 ? lower : lower + 1; }
@@ -54,6 +76,28 @@ function interval<T extends { time: number; easing?: Ease }>(keys: T[], time: nu
 export function sampleObject(keys: ObjectKey[], time: number): ObjectKey {
   const [a, b, t] = interval(keys, time);
   return { time, position: mix3(a.position, b.position, t), rotation: mix3(a.rotation, b.rotation, t), easing: a.easing ?? 'linear' };
+}
+export function sampleGroup(keys: ObjectKey[], time: number): ObjectKey {
+  const [a, b, t] = interval(keys, time), rotation = quaternionToEuler(slerpQuaternion(eulerToQuaternion(a.rotation), eulerToQuaternion(b.rotation), t));
+  return { time, position: mix3(a.position, b.position, t), rotation, easing: a.easing ?? 'linear' };
+}
+export function composeObjectPose(local: ObjectKey, parent?: ObjectKey): ObjectKey {
+  if (!parent) return { ...local, position: [...local.position], rotation: [...local.rotation] };
+  const parentRotation = eulerToQuaternion(parent.rotation);
+  return { ...local, position: add3(parent.position, rotateByQuaternion(local.position, parentRotation)), rotation: quaternionToEuler(multiplyQuaternion(parentRotation, eulerToQuaternion(local.rotation))) };
+}
+export function relativeObjectPose(world: ObjectKey, parent?: ObjectKey): ObjectKey {
+  if (!parent) return { ...world, position: [...world.position], rotation: [...world.rotation] };
+  const inverse = invertQuaternion(eulerToQuaternion(parent.rotation));
+  return { ...world, position: rotateByQuaternion(sub3(world.position, parent.position), inverse), rotation: quaternionToEuler(multiplyQuaternion(inverse, eulerToQuaternion(world.rotation))) };
+}
+export function reparentObject(object: SceneObject, from: SceneGroup | undefined, to: SceneGroup | undefined, sampleTimes: number[] = []): SceneObject {
+  const times = [...new Set([...sampleTimes, ...object.keyframes, ...(from?.keyframes ?? []), ...(to?.keyframes ?? [])].map(value => typeof value === 'number' ? value : value.time))].sort((a, b) => a - b);
+  const keyframes = times.map(time => {
+    const local = sampleObject(object.keyframes, time), world = composeObjectPose(local, from ? sampleGroup(from.keyframes, time) : undefined);
+    return relativeObjectPose(world, to ? sampleGroup(to.keyframes, time) : undefined);
+  });
+  return { ...object, keyframes };
 }
 export function sampleCamera(keys: CameraKey[], time: number): CameraKey {
   const [a, b, t] = interval(keys, time);
@@ -111,7 +155,7 @@ export function parseProject(raw: unknown): Project {
     return result;
   };
   if (!Array.isArray(p.objects) || p.objects.length > 500) return fail(t('model.objects'));
-  const objects = p.objects.map(value => { const o = record(value); const asset = str(o.asset); const color = str(o.color);
+  let objects = p.objects.map(value => { const o = record(value); const asset = str(o.asset); const color = str(o.color);
     if (!primitives.includes(asset) && (!/\.glb$/i.test(asset) || asset.startsWith('/') || asset.includes('..') || asset.includes(':') || asset.includes('\\'))) fail(t('model.assetPath'));
     if (!/^#[0-9a-f]{6}$/i.test(color)) fail(t('model.color'));
     let visibility: VisibilityRange | undefined;
@@ -146,11 +190,19 @@ export function parseProject(raw: unknown): Project {
     const objectIds = (rawObjectIds as unknown[]).map(str);
     if (new Set(objectIds).size !== objectIds.length || objectIds.some(id => !objects.some(o => o.id === id) || assigned.has(id))) fail(t('model.groupMember'));
     objectIds.forEach(id => assigned.add(id));
-    return { id: str(g.id), name: str(g.name), objectIds };
+    const legacy = g.keyframes === undefined;
+    return { id: str(g.id), name: str(g.name), objectIds, keyframes: legacy ? [] : keys(g.keyframes, false) as ObjectKey[], legacy };
   });
   if (new Set([...ids, ...groups.map(g => g.id)]).size !== ids.length + groups.length) fail(t('model.groupId'));
+  for (const group of groups) if (group.legacy) {
+    const members = group.objectIds.map(id => objects.find(object => object.id === id)).filter((object): object is SceneObject => !!object);
+    const pivot = members.length ? members.reduce<Vec3>((sum, object) => add3(sum, sampleObject(object.keyframes, 0).position), [0, 0, 0]).map(value => value / members.length) as Vec3 : [0, 0, 0] as Vec3;
+    group.keyframes = [{ time: 0, position: pivot, rotation: [0, 0, 0], easing: 'linear' }];
+    const memberIds = new Set(group.objectIds);
+    objects = objects.map(object => memberIds.has(object.id) ? { ...object, keyframes: object.keyframes.map(key => ({ ...key, position: sub3(key.position, pivot) })) } : object);
+  }
   const outputValue = p.output === undefined ? inferOutput(width, height) : record(p.output);
   const aspectRatio = aspectRatios.includes(outputValue.aspectRatio as AspectRatio) ? outputValue.aspectRatio as AspectRatio : fail(t('model.aspect'));
   const megapixelValue = megapixels.includes(outputValue.megapixels as Megapixels) ? outputValue.megapixels as Megapixels : fail(t('model.megapixels'));
-  return { version: 1, name: typeof p.name === 'string' ? p.name.slice(0, 100) : 'Imported scene', duration, fps, resolution: { width, height }, output: { aspectRatio, megapixels: megapixelValue }, objects, cameras, groups };
+  return { version: 1, name: typeof p.name === 'string' ? p.name.slice(0, 100) : 'Imported scene', duration, fps, resolution: { width, height }, output: { aspectRatio, megapixels: megapixelValue }, objects, cameras, groups: groups.map(({ legacy: _legacy, ...group }) => group) };
 }

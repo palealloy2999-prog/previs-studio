@@ -14,7 +14,7 @@ The application imports one UTF-8 JSON object with `version: 1`. Unknown propert
 | `output` | object | Canonical aspect-ratio and megapixel selections |
 | `objects` | array, up to 500 | Ordered scene objects |
 | `cameras` | array, up to 50 | Ordered production cameras |
-| `groups` | array, up to 100 | Object-only folders |
+| `groups` | array, up to 100 | Animated object parent groups |
 
 All IDs and entity names must be non-empty strings no longer than 500 characters. IDs must be unique across objects, cameras, and groups.
 
@@ -66,7 +66,7 @@ For an external file stored at `assets/models/props/chair.glb`, use `props/chair
 
 `color` is `#RRGGBB`. `scale` is an XYZ triple in which every value is greater than 0 and at most 1000. `uniformScale` is 0.001–1000. Effective display scale is `scale * uniformScale`. `visibility` is optional; omission means the full scene duration. A supplied range uses seconds from 0–600 and requires `end > start`.
 
-An object keyframe contains `time`, `position`, `rotation`, and optional `easing`. Position and rotation are finite XYZ numbers from -1,000,000 through 1,000,000. Rotation is in degrees. Easing is `linear`, `ease-in`, `ease-out`, or `ease-in-out`, and defaults to `linear`. Easing belongs to the outgoing segment from that key. Poses hold before the first key and after the final key.
+An object keyframe contains `time`, `position`, `rotation`, and optional `easing`. Position and rotation are finite XYZ numbers from -1,000,000 through 1,000,000. Rotation is in degrees. Easing is `linear`, `ease-in`, `ease-out`, or `ease-in-out`, and defaults to `linear`. Easing belongs to the outgoing segment from that key. Poses hold before the first key and after the final key. An ungrouped object's transform is in world space. A grouped object's transform is local to its parent group.
 
 ## Cameras and cuts
 
@@ -76,13 +76,13 @@ Camera `range` is half-open and requires `end > start`. At any time, the active 
 
 ## Groups
 
-A group has `id`, `name`, and `objectIds`. Every member ID must refer to an object; cameras cannot be grouped. An object may occur once in one group at most. Group array order and `objectIds` order control the scene-tree layout.
+A group has `id`, `name`, `objectIds`, and `keyframes`. Group keys use the object-key shape and provide the shared parent position and rotation. Group rotation interpolates with quaternion slerp so members retain a rigid arrangement; member keys remain available for local animation. Every member ID must refer to an object; cameras cannot be grouped. An object may occur once in one group at most. Group array order and `objectIds` order control the scene-tree and timeline layout.
 
 ## Semantic validation checklist
 
 JSON Schema cannot enforce all cross-field rules. Check these separately:
 
-- Keyframe times within each object or camera are unique to a tolerance of `0.00001` seconds.
+- Keyframe times within each object, camera, or group are unique to a tolerance of `0.00001` seconds.
 - Object, camera, and group IDs do not collide.
 - Group member IDs exist, are not duplicated, and are not assigned to another group.
 - Ranges have `end > start`.

@@ -20,9 +20,10 @@ Use half-open time ranges: an object or camera with `{ "start": 2, "end": 5 }` i
 
 Before returning JSON, confirm that:
 
-- every object and camera has at least one keyframe;
+- every object, camera, and group has at least one keyframe;
 - keyframe times are unique within each track;
 - every group member names an existing object and belongs to at most one group;
+- grouped object transforms are local to their group, while group keyframes carry the shared parent motion;
 - IDs are unique across objects, cameras, and groups;
 - built-in asset names and output enum strings match the reference exactly;
 - external assets use forward-slash relative `.glb` paths with no drive letter, leading slash, backslash, or `..` segment;

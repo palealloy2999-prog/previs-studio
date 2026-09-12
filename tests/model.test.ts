@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeCamera, calculateResolution, isObjectVisible, objectRange, newProject, removeCameraKey, sampleObject, sampleCamera, transformAroundCenter, upsert, upsertCameraKey, parseProject } from '../src/model';
+import { activeCamera, calculateResolution, composeObjectPose, isObjectVisible, objectRange, newProject, removeCameraKey, reparentObject, sampleGroup, sampleObject, sampleCamera, upsert, upsertCameraKey, parseProject, type SceneGroup } from '../src/model';
 describe('scene and animation contract', () => {
   it('uses 24 fps by default and accepts only the output frame-rate presets', () => {
     const scene = newProject();
@@ -82,15 +82,35 @@ describe('scene and animation contract', () => {
     const restored = parseProject(legacy);
     expect(restored.objects[0].scale).toEqual([1, 1, 1]); expect(restored.objects[0].uniformScale).toBe(1); expect(restored.output.aspectRatio).toBe('16:9 landscape'); expect(restored.groups).toEqual([]);
   });
-  it('round trips folders, rejects duplicate membership, and transforms around the shared center', () => {
-    const scene = newProject(true); scene.groups = [{ id: 'group-1', name: 'Cast', objectIds: ['character-a', 'character-b'] }];
+  it('round trips groups and rejects duplicate membership', () => {
+    const scene = newProject(true); scene.groups = [{ id: 'group-1', name: 'Cast', objectIds: ['character-a', 'character-b'], keyframes: [{ time: 0, position: [0, 0, 0], rotation: [0, 0, 0], easing: 'linear' }] }];
     expect(parseProject(JSON.parse(JSON.stringify(scene))).groups).toEqual(scene.groups);
     expect(() => parseProject({ ...scene, groups: [...scene.groups, { id: 'group-2', name: 'Duplicate', objectIds: ['character-a'] }] })).toThrow();
-    const transformed = transformAroundCenter([
-      { time: 0, position: [-2, 0, 0], rotation: [0, 0, 0] },
-      { time: 0, position: [2, 0, 0], rotation: [0, 10, 0] },
-    ], [1, 0, 0], [0, 180, 0]);
-    expect(transformed[0].position[0]).toBeCloseTo(3); expect(transformed[1].position[0]).toBeCloseTo(-1);
-    expect(transformed.map(key => key.rotation[1])).toEqual([180, 190]);
+  });
+  it('keeps grouped children rigid during parent rotation and preserves world poses when ungrouping', () => {
+    const group: SceneGroup = { id: 'group-1', name: 'Pair', objectIds: ['a', 'b'], keyframes: [
+      { time: 0, position: [0, 0, 0], rotation: [0, 0, 0] },
+      { time: 10, position: [0, 0, 0], rotation: [0, 180, 0] },
+    ] };
+    const objects = [
+      { id: 'a', name: 'A', asset: 'primitive:box', color: '#ffffff', scale: [1, 1, 1] as [number, number, number], uniformScale: 1, keyframes: [{ time: 0, position: [-2, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number] }] },
+      { id: 'b', name: 'B', asset: 'primitive:box', color: '#ffffff', scale: [1, 1, 1] as [number, number, number], uniformScale: 1, keyframes: [{ time: 0, position: [2, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number] }] },
+    ];
+    const parent = sampleGroup(group.keyframes, 5), world = objects.map(object => composeObjectPose(sampleObject(object.keyframes, 5), parent));
+    expect(Math.hypot(...world[0].position.map((value, index) => value - world[1].position[index]))).toBeCloseTo(4);
+    expect(world[0].position[0]).toBeCloseTo(0); expect(Math.abs(world[0].position[2])).toBeCloseTo(2);
+    const baked = objects.map(object => reparentObject(object, group, undefined, [5]));
+    for (let index = 0; index < baked.length; index++) {
+      const bakedPosition = composeObjectPose(sampleObject(baked[index].keyframes, 5)).position;
+      bakedPosition.forEach((value, axis) => expect(value).toBeCloseTo(world[index].position[axis]));
+    }
+  });
+  it('migrates legacy folder groups to parent tracks without changing world positions', () => {
+    const legacy = newProject(true) as unknown as { groups: { id: string; name: string; objectIds: string[] }[]; objects: ReturnType<typeof newProject>['objects'] };
+    const before = legacy.objects.slice(0, 2).map(object => sampleObject(object.keyframes, 0).position);
+    legacy.groups = [{ id: 'legacy-group', name: 'Legacy', objectIds: legacy.objects.slice(0, 2).map(object => object.id) }];
+    const migrated = parseProject(legacy), parent = sampleGroup(migrated.groups[0].keyframes, 0);
+    const after = migrated.objects.slice(0, 2).map(object => composeObjectPose(sampleObject(object.keyframes, 0), parent).position);
+    expect(after).toEqual(before); expect(migrated.groups[0].keyframes).toHaveLength(1);
   });
 });
