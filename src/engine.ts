@@ -7,10 +7,11 @@ import { t } from './i18n';
 
 type Callbacks = { select: (id: string, additive: boolean) => void; transform: (id: string, key: ObjectKey | CameraKey) => void; transformGroup: (id: string, key: ObjectKey) => void; motionControl: (id: string, startTime: number, index: number, position: Vec3) => void; toggleMode: () => void; error: (message: string) => void; beginEdit?: () => void; endEdit?: () => void };
 const deg = THREE.MathUtils.radToDeg;
+const VIEW_FAR = 5000;
 export class SceneEngine {
   scene = new THREE.Scene();
-  editor = new THREE.PerspectiveCamera(45, 1, 0.1, 500);
-  camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 100);
+  editor = new THREE.PerspectiveCamera(45, 1, 0.1, VIEW_FAR);
+  camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, VIEW_FAR);
   renderer: THREE.WebGLRenderer;
   preview: THREE.WebGLRenderer;
   orbit: OrbitControls;
@@ -39,7 +40,6 @@ export class SceneEngine {
   private activeMotionHandle: { id: string; startTime: number; index: number } | null = null;
   constructor(private host: HTMLElement, private previewHost: HTMLElement, private assets: Map<string, string>, private callbacks: Callbacks) {
     this.scene.background = new THREE.Color('#20272b');
-    this.scene.fog = new THREE.Fog('#20272b', 35, 95);
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.preview = new THREE.WebGLRenderer({ antialias: true });
     for (const renderer of [this.renderer, this.preview]) {
@@ -59,7 +59,7 @@ export class SceneEngine {
     this.scene.add(new THREE.HemisphereLight(0xe2efff, 0x55524a, 2.5));
     const sun = new THREE.DirectionalLight(0xffecd5, 3.2); sun.position.set(5, 12, 7); sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -18, right: 18, top: 18, bottom: -18 }); sun.shadow.normalBias = 0.03; this.scene.add(sun);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: '#303a3e', roughness: 1 })); ground.rotation.x = -Math.PI / 2; ground.position.y = -0.025; ground.receiveShadow = true; this.scene.add(ground);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), new THREE.MeshStandardMaterial({ color: '#303a3e', roughness: 1 })); ground.rotation.x = -Math.PI / 2; ground.position.y = -0.025; ground.receiveShadow = true; this.scene.add(ground);
     const grid = new THREE.GridHelper(100, 100, 0x687777, 0x424e52); this.helpers.add(grid, new THREE.AxesHelper(2));
     const groupPivot = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 10), new THREE.MeshBasicMaterial({ color: '#e8b880', depthTest: false }));
     groupPivot.renderOrder = 10; this.groupRig.add(groupPivot); this.groupRig.visible = false; this.helpers.add(this.groupRig);
