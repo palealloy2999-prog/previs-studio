@@ -3,7 +3,9 @@ import { t } from './i18n';
 export type Vec3 = [number, number, number];
 type Quat = [number, number, number, number];
 export type Ease = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
-export type ObjectKey = { time: number; position: Vec3; rotation: Vec3; easing?: Ease };
+export type MotionPreset = 'bezier' | 'arc' | 'barrel-roll';
+export type MotionPath = { preset: MotionPreset; controlPoints: [Vec3, Vec3]; orientToPath: boolean; roll: number };
+export type ObjectKey = { time: number; position: Vec3; rotation: Vec3; easing?: Ease; motion?: MotionPath };
 export type CameraKey = { time: number; position: Vec3; target: Vec3; fov: number; easing?: Ease };
 export type VisibilityRange = { start: number; end: number };
 export type SceneObject = { id: string; name: string; asset: string; color: string; keyframes: ObjectKey[]; scale: Vec3; uniformScale: number; visibility?: VisibilityRange };
@@ -54,6 +56,29 @@ function slerpQuaternion(a: Quat, b: Quat, t: number): Quat {
   const theta = Math.acos(clamp(dot, -1, 1)), sinTheta = Math.sin(theta), wa = Math.sin((1 - t) * theta) / sinTheta, wb = Math.sin(t * theta) / sinTheta;
   return a.map((value, index) => value * wa + target[index] * wb) as Quat;
 }
+const cubicBezier = (a: Vec3, b: Vec3, c: Vec3, d: Vec3, t: number): Vec3 => {
+  const u = 1 - t, uu = u * u, tt = t * t;
+  return a.map((value, index) => uu * u * value + 3 * uu * t * b[index] + 3 * u * tt * c[index] + tt * t * d[index]) as Vec3;
+};
+const cubicBezierTangent = (a: Vec3, b: Vec3, c: Vec3, d: Vec3, t: number): Vec3 => {
+  const u = 1 - t;
+  return a.map((value, index) => 3 * u * u * (b[index] - value) + 6 * u * t * (c[index] - b[index]) + 3 * t * t * (d[index] - c[index])) as Vec3;
+};
+function motionPose(a: ObjectKey, b: ObjectKey, t: number, rotation: Vec3): { position: Vec3; rotation: Vec3 } {
+  if (!a.motion) return { position: mix3(a.position, b.position, t), rotation };
+  const position = cubicBezier(a.position, a.motion.controlPoints[0], a.motion.controlPoints[1], b.position, t);
+  if (!a.motion.orientToPath) return { position, rotation: [rotation[0], rotation[1], rotation[2] + a.motion.roll * t] };
+  const angles = (at: number): Vec3 => { const tangent = cubicBezierTangent(a.position, a.motion!.controlPoints[0], a.motion!.controlPoints[1], b.position, at), horizontal = Math.hypot(tangent[0], tangent[2]); return Math.hypot(...tangent) < .000001 ? [0, 0, 0] : [-Math.atan2(tangent[1], horizontal) * 180 / Math.PI, Math.atan2(tangent[0], tangent[2]) * 180 / Math.PI, 0]; };
+  const tangent = cubicBezierTangent(a.position, a.motion.controlPoints[0], a.motion.controlPoints[1], b.position, t);
+  if (Math.hypot(...tangent) < 0.000001) return { position, rotation: [rotation[0], rotation[1], rotation[2] + a.motion.roll * t] };
+  const current = angles(t), first = angles(0), last = angles(1);
+  return { position, rotation: [current[0] + lerp(a.rotation[0] - first[0], b.rotation[0] - last[0], t), current[1] + lerp(a.rotation[1] - first[1], b.rotation[1] - last[1], t), rotation[2] + a.motion.roll * t] };
+}
+export function createMotionPath(start: ObjectKey, end: ObjectKey, preset: MotionPreset): MotionPath {
+  const delta = sub3(end.position, start.position), distance = Math.hypot(...delta), first = add3(start.position, delta.map(value => value / 3) as Vec3), second = add3(start.position, delta.map(value => value * 2 / 3) as Vec3);
+  if (preset === 'arc') { const lift = Math.max(1, distance * .35); first[1] += lift; second[1] += lift; }
+  return { preset, controlPoints: [first, second], orientToPath: preset === 'barrel-roll', roll: preset === 'barrel-roll' ? 360 : 0 };
+}
 function ratioParts(value: string): [number, number] { const match = /^(\d+):(\d+)/.exec(value); return match ? [Number(match[1]), Number(match[2])] : [1, 1]; }
 function roundHalfEven(value: number): number { const lower = Math.floor(value), fraction = value - lower; if (fraction < .5) return lower; if (fraction > .5) return lower + 1; return lower % 2 === 0 ? lower : lower + 1; }
 export function calculateResolution(aspectRatio: AspectRatio, megapixelValue: Megapixels): { width: number; height: number } {
@@ -75,11 +100,12 @@ function interval<T extends { time: number; easing?: Ease }>(keys: T[], time: nu
 }
 export function sampleObject(keys: ObjectKey[], time: number): ObjectKey {
   const [a, b, t] = interval(keys, time);
-  return { time, position: mix3(a.position, b.position, t), rotation: mix3(a.rotation, b.rotation, t), easing: a.easing ?? 'linear' };
+  const pose = motionPose(a, b, t, mix3(a.rotation, b.rotation, t));
+  return { time, ...pose, easing: a.easing ?? 'linear' };
 }
 export function sampleGroup(keys: ObjectKey[], time: number): ObjectKey {
-  const [a, b, t] = interval(keys, time), rotation = quaternionToEuler(slerpQuaternion(eulerToQuaternion(a.rotation), eulerToQuaternion(b.rotation), t));
-  return { time, position: mix3(a.position, b.position, t), rotation, easing: a.easing ?? 'linear' };
+  const [a, b, t] = interval(keys, time), rotation = quaternionToEuler(slerpQuaternion(eulerToQuaternion(a.rotation), eulerToQuaternion(b.rotation), t)), pose = motionPose(a, b, t, rotation);
+  return { time, ...pose, easing: a.easing ?? 'linear' };
 }
 export function composeObjectPose(local: ObjectKey, parent?: ObjectKey): ObjectKey {
   if (!parent) return { ...local, position: [...local.position], rotation: [...local.rotation] };
@@ -95,7 +121,15 @@ export function reparentObject(object: SceneObject, from: SceneGroup | undefined
   const times = [...new Set([...sampleTimes, ...object.keyframes, ...(from?.keyframes ?? []), ...(to?.keyframes ?? [])].map(value => typeof value === 'number' ? value : value.time))].sort((a, b) => a - b);
   const keyframes = times.map(time => {
     const local = sampleObject(object.keyframes, time), world = composeObjectPose(local, from ? sampleGroup(from.keyframes, time) : undefined);
-    return relativeObjectPose(world, to ? sampleGroup(to.keyframes, time) : undefined);
+    const result = relativeObjectPose(world, to ? sampleGroup(to.keyframes, time) : undefined), source = object.keyframes.find(key => Math.abs(key.time - time) < .00001);
+    if (!sampleTimes.length && source?.motion) {
+      const transformPoint = (position: Vec3) => {
+        const worldPoint = from ? composeObjectPose({ time, position, rotation: [0, 0, 0] }, sampleGroup(from.keyframes, time)).position : position;
+        return to ? relativeObjectPose({ time, position: worldPoint, rotation: [0, 0, 0] }, sampleGroup(to.keyframes, time)).position : worldPoint;
+      };
+      result.motion = { ...source.motion, controlPoints: source.motion.controlPoints.map(transformPoint) as [Vec3, Vec3] };
+    }
+    return result;
   });
   return { ...object, keyframes };
 }
@@ -105,6 +139,10 @@ export function sampleCamera(keys: CameraKey[], time: number): CameraKey {
 }
 export function upsert<T extends { time: number }>(keys: T[], key: T): T[] {
   return [...keys.filter(k => Math.abs(k.time - key.time) > 0.00001), structuredClone(key)].sort((a, b) => a.time - b.time);
+}
+export function upsertObjectKey(keys: ObjectKey[], key: ObjectKey): ObjectKey[] {
+  const existing = keys.find(value => Math.abs(value.time - key.time) < .00001);
+  return upsert(keys, existing?.motion && !key.motion ? { ...key, motion: existing.motion } : key);
 }
 export function upsertCameraKey(keys: CameraKey[], key: CameraKey): CameraKey[] {
   return upsert(keys, key);
@@ -148,7 +186,16 @@ export function parseProject(raw: unknown): Project {
     if (!Array.isArray(v) || !v.length || v.length > 20000) return fail(t('model.keys'));
     const result = v.map(value => { const k = record(value); const time = number(k.time, 0, 600); const position = vector(k.position); const easing = k.easing ?? 'linear';
       if (!['linear', 'ease-in', 'ease-out', 'ease-in-out'].includes(easing as string)) fail(t('model.easing'));
-      if (!camera) return { time, position, rotation: vector(k.rotation), easing: easing as Ease };
+      if (!camera) {
+        let motion: MotionPath | undefined;
+        if (k.motion !== undefined) {
+          const m = record(k.motion), preset = m.preset, controlPoints = m.controlPoints, orientToPath = m.orientToPath;
+          if (!['bezier', 'arc', 'barrel-roll'].includes(preset as string) || !Array.isArray(controlPoints) || controlPoints.length !== 2 || typeof orientToPath !== 'boolean') fail(t('model.motion'));
+          const points = controlPoints as unknown[];
+          motion = { preset: preset as MotionPreset, controlPoints: [vector(points[0]), vector(points[1])], orientToPath: orientToPath as boolean, roll: number(m.roll, -36000, 36000) };
+        }
+        return { time, position, rotation: vector(k.rotation), easing: easing as Ease, ...(motion ? { motion } : {}) };
+      }
       return { time, position, target: vector(k.target), fov: number(k.fov, 5, 150), easing: easing as Ease };
     }).sort((a, b) => a.time - b.time);
     if (result.some((k, i) => i && Math.abs(k.time - result[i - 1].time) < 0.00001)) fail(t('model.duplicateKey'));

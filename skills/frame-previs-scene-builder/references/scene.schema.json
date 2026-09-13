@@ -43,6 +43,23 @@
       "maxItems": 3
     },
     "easing": { "enum": ["linear", "ease-in", "ease-out", "ease-in-out"] },
+    "motion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preset", "controlPoints", "orientToPath", "roll"],
+      "properties": {
+        "preset": { "enum": ["bezier", "arc", "barrel-roll"] },
+        "controlPoints": {
+          "type": "array",
+          "prefixItems": [{ "$ref": "#/$defs/vec3" }, { "$ref": "#/$defs/vec3" }],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "orientToPath": { "type": "boolean" },
+        "roll": { "type": "number", "minimum": -36000, "maximum": 36000 }
+      }
+    },
     "range": {
       "type": "object",
       "additionalProperties": false,
@@ -60,7 +77,8 @@
         "time": { "type": "number", "minimum": 0, "maximum": 600 },
         "position": { "$ref": "#/$defs/vec3" },
         "rotation": { "$ref": "#/$defs/vec3" },
-        "easing": { "$ref": "#/$defs/easing" }
+        "easing": { "$ref": "#/$defs/easing" },
+        "motion": { "$ref": "#/$defs/motion" }
       }
     },
     "cameraKey": {

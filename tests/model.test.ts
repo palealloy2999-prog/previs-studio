@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeCamera, calculateResolution, composeObjectPose, isObjectVisible, objectRange, newProject, removeCameraKey, reparentObject, sampleGroup, sampleObject, sampleCamera, upsert, upsertCameraKey, parseProject, type SceneGroup } from '../src/model';
+import { activeCamera, calculateResolution, composeObjectPose, createMotionPath, isObjectVisible, objectRange, newProject, removeCameraKey, reparentObject, sampleGroup, sampleObject, sampleCamera, upsert, upsertObjectKey, upsertCameraKey, parseProject, type ObjectKey, type SceneGroup } from '../src/model';
 describe('scene and animation contract', () => {
   it('uses 24 fps by default and accepts only the output frame-rate presets', () => {
     const scene = newProject();
@@ -30,6 +30,25 @@ describe('scene and animation contract', () => {
     expect(sampleObject(keys, 2.5).position).toEqual([-1, 0, 0]);
     expect(sampleObject(keys, 2.5).rotation).toEqual([0, 42.5, 0]);
     expect(sampleObject(keys, 99).position).toEqual([1, 0, -1]);
+  });
+  it('evaluates editable motion paths and barrel roll without creating intermediate keys', () => {
+    const start: ObjectKey = { time: 0, position: [0, 0, 0], rotation: [0, 0, 0] }, end: ObjectKey = { time: 4, position: [0, 0, 8], rotation: [0, 0, 0] };
+    const arc = createMotionPath(start, end, 'arc'), arcKeys = [{ ...start, motion: arc }, end];
+    expect(arc.controlPoints[0][1]).toBeGreaterThan(0);
+    expect(sampleObject(arcKeys, 0).position).toEqual(start.position);
+    expect(sampleObject(arcKeys, 2).position[1]).toBeGreaterThan(0);
+    const barrelKeys = [{ ...start, motion: createMotionPath(start, end, 'barrel-roll') }, end];
+    expect(sampleObject(barrelKeys, 2).rotation[2]).toBeCloseTo(180);
+    expect(barrelKeys).toHaveLength(2);
+  });
+  it('round trips motion paths, rejects malformed paths, and preserves them when updating a key', () => {
+    const scene = newProject(true), start = scene.objects[0].keyframes[0], end = scene.objects[0].keyframes[1];
+    start.motion = createMotionPath(start, end, 'bezier');
+    const restored = parseProject(JSON.parse(JSON.stringify(scene)));
+    expect(restored.objects[0].keyframes[0].motion).toEqual(start.motion);
+    expect(upsertObjectKey(restored.objects[0].keyframes, { ...start, position: [3, 2, 1], motion: undefined })[0].motion).toEqual(start.motion);
+    const malformed = JSON.parse(JSON.stringify(scene)); malformed.objects[0].keyframes[0].motion.controlPoints = [[0, 0, 0]];
+    expect(() => parseProject(malformed)).toThrow();
   });
   it('inserts sorted keys and replaces the same time', () => {
     expect(upsert([{ time: 2, v: 1 }, { time: 3, v: 2 }], { time: 2, v: 3 })).toEqual([{ time: 2, v: 3 }, { time: 3, v: 2 }]);

@@ -10,7 +10,7 @@
       "id": "actor-a", "name": "Actor A", "asset": "primitive:mannequin", "color": "#eaa36b",
       "scale": [1, 1, 1], "uniformScale": 1, "visibility": { "start": 0, "end": 8 },
       "keyframes": [
-        { "time": 0, "position": [-1.2, 0, 0], "rotation": [0, 20, 0], "easing": "ease-in-out" },
+        { "time": 0, "position": [-1.2, 0, 0], "rotation": [0, 20, 0], "easing": "ease-in-out", "motion": { "preset": "arc", "controlPoints": [[-1.1, 0.5, -0.1], [-0.8, 0.5, -0.2]], "orientToPath": false, "roll": 0 } },
         { "time": 8, "position": [-0.7, 0, -0.3], "rotation": [0, 35, 0], "easing": "linear" }
       ]
     },

@@ -66,7 +66,22 @@ For an external file stored at `assets/models/props/chair.glb`, use `props/chair
 
 `color` is `#RRGGBB`. `scale` is an XYZ triple in which every value is greater than 0 and at most 1000. `uniformScale` is 0.001–1000. Effective display scale is `scale * uniformScale`. `visibility` is optional; omission means the full scene duration. A supplied range uses seconds from 0–600 and requires `end > start`.
 
-An object keyframe contains `time`, `position`, `rotation`, and optional `easing`. Position and rotation are finite XYZ numbers from -1,000,000 through 1,000,000. Rotation is in degrees. Easing is `linear`, `ease-in`, `ease-out`, or `ease-in-out`, and defaults to `linear`. Easing belongs to the outgoing segment from that key. Poses hold before the first key and after the final key. An ungrouped object's transform is in world space. A grouped object's transform is local to its parent group.
+An object keyframe contains `time`, `position`, `rotation`, optional `easing`, and optional outgoing `motion`. Position and rotation are finite XYZ numbers from -1,000,000 through 1,000,000. Rotation is in degrees. Easing is `linear`, `ease-in`, `ease-out`, or `ease-in-out`, and defaults to `linear`. Easing belongs to the outgoing segment from that key. Poses hold before the first key and after the final key. An ungrouped object's transform is in world space. A grouped object's transform is local to its parent group.
+
+## Motion paths
+
+Add `motion` to a non-final object or group key to replace straight position interpolation through the following key with a cubic Bezier path:
+
+```json
+"motion": {
+  "preset": "barrel-roll",
+  "controlPoints": [[2, 3, 1], [6, 3, 5]],
+  "orientToPath": true,
+  "roll": 360
+}
+```
+
+`preset` is `bezier`, `arc`, or `barrel-roll` and identifies the editable template shown in the UI. `controlPoints` contains the two absolute Bezier control points in the same coordinate space as the key position. `orientToPath` turns the entity toward the curve tangent while preserving the keyed endpoint rotations. `roll` adds that many degrees around the forward axis over the segment; use values such as `360` or `720` for one or two barrel rolls. Easing changes progress along the entire path. Omit `motion` for ordinary straight interpolation. A final-key `motion` value has no effect because there is no outgoing segment.
 
 ## Cameras and cuts
 
@@ -76,7 +91,7 @@ Camera `range` is half-open and requires `end > start`. At any time, the active 
 
 ## Groups
 
-A group has `id`, `name`, `objectIds`, and `keyframes`. Group keys use the object-key shape and provide the shared parent position and rotation. Group rotation interpolates with quaternion slerp so members retain a rigid arrangement; member keys remain available for local animation. Every member ID must refer to an object; cameras cannot be grouped. An object may occur once in one group at most. Group array order and `objectIds` order control the scene-tree and timeline layout.
+A group has `id`, `name`, `objectIds`, and `keyframes`. Group keys use the object-key shape, including optional motion paths, and provide the shared parent position and rotation. Group rotation interpolates with quaternion slerp so members retain a rigid arrangement; member keys remain available for local animation. Put aircraft assembled from several objects in a group and apply the flight path to the group keys. Every member ID must refer to an object; cameras cannot be grouped. An object may occur once in one group at most. Group array order and `objectIds` order control the scene-tree and timeline layout.
 
 ## Semantic validation checklist
 

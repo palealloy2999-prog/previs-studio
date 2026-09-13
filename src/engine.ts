@@ -5,7 +5,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { activeCamera, composeObjectPose, isObjectVisible, relativeObjectPose, sampleCamera, sampleGroup, sampleObject, type CameraKey, type ObjectKey, type Project, type Vec3 } from './model';
 import { t } from './i18n';
 
-type Callbacks = { select: (id: string, additive: boolean) => void; transform: (id: string, key: ObjectKey | CameraKey) => void; transformGroup: (id: string, key: ObjectKey) => void; toggleMode: () => void; error: (message: string) => void; beginEdit?: () => void; endEdit?: () => void };
+type Callbacks = { select: (id: string, additive: boolean) => void; transform: (id: string, key: ObjectKey | CameraKey) => void; transformGroup: (id: string, key: ObjectKey) => void; motionControl: (id: string, startTime: number, index: number, position: Vec3) => void; toggleMode: () => void; error: (message: string) => void; beginEdit?: () => void; endEdit?: () => void };
 const deg = THREE.MathUtils.radToDeg;
 export class SceneEngine {
   scene = new THREE.Scene();
@@ -18,6 +18,9 @@ export class SceneEngine {
   helpers = new THREE.Group();
   cameraRigs = new Map<string, { rig: THREE.Group; helperCamera: THREE.PerspectiveCamera; frustum: THREE.CameraHelper }>();
   groupRig = new THREE.Group();
+  motionPath = new THREE.Group();
+  motionLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xf0b56d, depthTest: false, transparent: true, opacity: .9 }));
+  motionHandles = [0, 1].map(index => { const node = new THREE.Mesh(new THREE.SphereGeometry(.14, 16, 10), new THREE.MeshBasicMaterial({ color: index ? 0x7db9ce : 0xf0b56d, depthTest: false })); node.renderOrder = 12; return node; });
   objects = new Map<string, THREE.Group>();
   pending = new Set<Promise<void>>();
   failures = new Map<string, string>();
@@ -33,6 +36,7 @@ export class SceneEngine {
   private resize: ResizeObserver;
   private selection = new THREE.BoxHelper(new THREE.Object3D(), 0xe7b57b);
   private secondarySelections = new Map<string, THREE.BoxHelper>();
+  private activeMotionHandle: { id: string; startTime: number; index: number } | null = null;
   constructor(private host: HTMLElement, private previewHost: HTMLElement, private assets: Map<string, string>, private callbacks: Callbacks) {
     this.scene.background = new THREE.Color('#20272b');
     this.scene.fog = new THREE.Fog('#20272b', 35, 95);
@@ -59,6 +63,7 @@ export class SceneEngine {
     const grid = new THREE.GridHelper(100, 100, 0x687777, 0x424e52); this.helpers.add(grid, new THREE.AxesHelper(2));
     const groupPivot = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 10), new THREE.MeshBasicMaterial({ color: '#e8b880', depthTest: false }));
     groupPivot.renderOrder = 10; this.groupRig.add(groupPivot); this.groupRig.visible = false; this.helpers.add(this.groupRig);
+    this.motionLine.renderOrder = 11; this.motionPath.add(this.motionLine, ...this.motionHandles); this.motionPath.visible = false; this.helpers.add(this.motionPath);
     this.selection.visible = false; this.helpers.add(this.selection); this.scene.add(this.helpers, this.camera);
     this.transform = new TransformControls(this.editor, this.renderer.domElement);
     this.transform.setSize(0.85); this.helpers.add(this.transform.getHelper());
@@ -70,6 +75,15 @@ export class SceneEngine {
     this.transform.addEventListener('objectChange', () => {
       const node = this.transform.object; if (!node || !this.project) return;
       const position = node.position.toArray() as Vec3;
+      if (this.activeMotionHandle && node === this.motionHandles[this.activeMotionHandle.index]) {
+        const { id, startTime, index } = this.activeMotionHandle, object = this.project.objects.find(value => value.id === id), keys = object?.keyframes ?? this.project.groups.find(value => value.id === id)?.keyframes, keyIndex = keys?.findIndex(key => Math.abs(key.time - startTime) < .00001);
+        if (object && keys && keyIndex !== undefined && keyIndex >= 0 && keyIndex < keys.length - 1) {
+          const handleTime = startTime + (keys[keyIndex + 1].time - startTime) * (index + 1) / 3, parent = this.project.groups.find(group => group.objectIds.includes(id));
+          const local = parent ? relativeObjectPose({ time: handleTime, position, rotation: [0, 0, 0] }, sampleGroup(parent.keyframes, handleTime)).position : position;
+          this.callbacks.motionControl(id, startTime, index, local);
+        } else this.callbacks.motionControl(id, startTime, index, position);
+        return;
+      }
       const selectedGroup = this.project.groups.find(group => group.id === this.selected);
       if (selectedGroup && node === this.groupRig) {
         const current = sampleGroup(selectedGroup.keyframes, this.time);
@@ -101,6 +115,9 @@ export class SceneEngine {
     if (this.showCamera || event.button !== 0 || this.down.gizmo || Math.hypot(event.clientX - this.down.x, event.clientY - this.down.y) > 4) return;
     const rect = this.renderer.domElement.getBoundingClientRect(); const ray = new THREE.Raycaster();
     ray.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1), this.editor);
+    const handleHit = this.motionPath.visible ? ray.intersectObjects(this.motionHandles, false)[0] : undefined;
+    if (handleHit) { const index = this.motionHandles.indexOf(handleHit.object as typeof this.motionHandles[number]); if (index >= 0) { const startTime = Number(handleHit.object.userData.startTime); this.activeMotionHandle = { id: this.selected, startTime, index }; this.transform.setMode('translate'); this.transform.attach(this.motionHandles[index]); return; } }
+    this.activeMotionHandle = null;
     const pickable = [...this.objects.values()].filter(node => node.visible).concat([...this.cameraRigs.values()].map(value => value.rig));
     if (this.groupRig.visible) pickable.push(this.groupRig);
     const hits = ray.intersectObjects(pickable, true);
@@ -147,14 +164,36 @@ export class SceneEngine {
       if (visual.rig.userData.color !== camera.color) { colorNode(visual.rig, camera.color); visual.rig.userData.color = camera.color; }
     }
     this.applyTime(time);
+    this.syncMotionPath();
     const selectedCamera = project.cameras.find(camera => camera.id === selected);
     const selectedGroup = project.groups.find(group => group.id === selected);
     this.groupRig.userData.id = selectedGroup?.id ?? '';
-    const target = selectedGroup ? this.groupRig : selectedCamera ? this.cameraRigs.get(selectedCamera.id)?.rig : this.objects.get(selected);
-    this.transform.setMode(mode);
+    const activeHandle = this.activeMotionHandle && this.activeMotionHandle.id === selected && this.motionPath.visible ? this.motionHandles[this.activeMotionHandle.index] : undefined;
+    const target = activeHandle ?? (selectedGroup ? this.groupRig : selectedCamera ? this.cameraRigs.get(selectedCamera.id)?.rig : this.objects.get(selected));
+    this.transform.setMode(activeHandle ? 'translate' : mode);
     if (target?.visible && !cameraView) { if (this.transform.object !== target) this.transform.attach(target); }
     else this.transform.detach();
     this.resizeViews();
+  }
+  private syncMotionPath() {
+    const object = this.project.objects.find(value => value.id === this.selected), group = this.project.groups.find(value => value.id === this.selected), keys = object?.keyframes ?? group?.keyframes;
+    const index = keys?.findIndex((key, keyIndex) => keyIndex < keys.length - 1 && this.time >= key.time && this.time < keys[keyIndex + 1].time) ?? -1;
+    const start = index >= 0 ? keys![index] : undefined, end = index >= 0 ? keys![index + 1] : undefined;
+    if (!start?.motion || !end || this.showCamera) {
+      this.motionPath.visible = false; this.host.dataset.motionPath = 'off'; this.host.dataset.motionHandles = '0';
+      if (this.activeMotionHandle && (!start || this.activeMotionHandle.id !== this.selected || Math.abs(this.activeMotionHandle.startTime - start.time) > .00001)) this.activeMotionHandle = null;
+      return;
+    }
+    const parent = object ? this.project.groups.find(value => value.objectIds.includes(object.id)) : undefined;
+    const worldAt = (sampleTime: number) => group ? sampleGroup(keys!, sampleTime).position : composeObjectPose(sampleObject(keys!, sampleTime), parent ? sampleGroup(parent.keyframes, sampleTime) : undefined).position;
+    const points = Array.from({ length: 49 }, (_, pointIndex) => new THREE.Vector3(...worldAt(start.time + (end.time - start.time) * pointIndex / 48)));
+    this.motionLine.geometry.dispose(); this.motionLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
+    start.motion.controlPoints.forEach((control, controlIndex) => {
+      const handleTime = start.time + (end.time - start.time) * (controlIndex + 1) / 3;
+      const world = parent ? composeObjectPose({ time: handleTime, position: control, rotation: [0, 0, 0] }, sampleGroup(parent.keyframes, handleTime)).position : control;
+      const handle = this.motionHandles[controlIndex]; handle.userData = { motionHandle: true, startTime: start.time }; if (!(this.transform.dragging && this.transform.object === handle)) handle.position.fromArray(world);
+    });
+    this.motionPath.visible = true; this.host.dataset.motionPath = start.motion.preset; this.host.dataset.motionHandles = '2';
   }
   applyTime(time: number) {
     if (!this.project) return;
